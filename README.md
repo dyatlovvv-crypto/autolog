@@ -2,6 +2,8 @@
 
 Android journal for car expenses. Kotlin, Jetpack Compose, Room. No ads.
 
+![Autolog](docs/hero.png)
+
 ## Build
 
 ```bash
