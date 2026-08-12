@@ -14,26 +14,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -52,7 +44,6 @@ object VehicleSelectorTags {
     const val SHEET = "vehicle_selector_sheet"
     const val ADD_VEHICLE = "vehicle_selector_add"
     fun item(id: Long) = "vehicle_selector_item_$id"
-    fun delete(id: Long) = "vehicle_selector_delete_$id"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,12 +56,10 @@ fun VehicleSelectorBar(
     onExpandChange: (Boolean) -> Unit,
     onSelectVehicle: (Long) -> Unit,
     onAddVehicle: () -> Unit,
-    onDeleteVehicle: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val current = vehicles.firstOrNull { it.id == currentVehicleId } ?: vehicles.firstOrNull()
     val tokens = LocalGlassTokens.current
-    var pendingDeleteId by remember { mutableStateOf<Long?>(null) }
 
     Column(modifier = modifier) {
         Text(
@@ -170,24 +159,12 @@ fun VehicleSelectorBar(
                                 )
                             },
                             trailingContent = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (selected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = "Выбрано",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { pendingDeleteId = vehicle.id },
-                                        modifier = Modifier.testTag(VehicleSelectorTags.delete(vehicle.id)),
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Удалить автомобиль",
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Выбрано",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
                                 }
                             },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -236,27 +213,5 @@ fun VehicleSelectorBar(
                 }
             }
         }
-    }
-
-    pendingDeleteId?.let { id ->
-        val name = vehicles.firstOrNull { it.id == id }?.name ?: "автомобиль"
-        AlertDialog(
-            onDismissRequest = { pendingDeleteId = null },
-            title = { Text("Удалить автомобиль?") },
-            text = { Text("«$name» и все связанные записи будут удалены.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteVehicle(id)
-                        pendingDeleteId = null
-                        onExpandChange(false)
-                    },
-                    modifier = Modifier.testTag("vehicle_delete_confirm"),
-                ) { Text("Удалить") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDeleteId = null }) { Text("Отмена") }
-            },
-        )
     }
 }

@@ -4,8 +4,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import ru.autolog.app.data.local.AutologDatabase
+import ru.autolog.app.data.local.entity.ExpenseEntity
 import ru.autolog.app.data.local.entity.RefuellingEntity
 import ru.autolog.app.data.local.entity.ReminderEntity
+import ru.autolog.app.data.local.entity.ServiceEntity
 import ru.autolog.app.data.local.entity.VehicleEntity
 import ru.autolog.app.domain.VehicleLimits
 import ru.autolog.app.domain.consumption.ConsumptionCalculator
@@ -19,15 +21,29 @@ class AutologRepository(private val db: AutologDatabase) {
 
     fun observeActiveVehicle(): Flow<VehicleEntity?> = db.vehicleDao().observeActive()
 
+    /** True if the phone has any vehicles (link must never wipe these). */
+    suspend fun hasLocalJournalData(): Boolean = db.vehicleDao().getAll().isNotEmpty()
+
     fun observeDashboard(vehicleId: Long): Flow<DashboardSnapshot> {
         return combine(
             db.vehicleDao().observeAll().map { list -> list.find { it.id == vehicleId } },
             db.refuellingDao().observeByVehicle(vehicleId),
             db.reminderDao().observeByVehicle(vehicleId),
-        ) { vehicle, refuels, reminders ->
-            buildDashboard(vehicle, refuels, reminders)
+            db.expenseDao().observeByVehicle(vehicleId),
+            db.serviceDao().observeByVehicle(vehicleId),
+        ) { vehicle, refuels, reminders, expenses, services ->
+            buildDashboard(vehicle, refuels, reminders, expenses, services)
         }
     }
+
+    fun observeRefuellings(vehicleId: Long): Flow<List<RefuellingEntity>> =
+        db.refuellingDao().observeByVehicle(vehicleId)
+
+    fun observeServices(vehicleId: Long): Flow<List<ServiceEntity>> =
+        db.serviceDao().observeByVehicle(vehicleId)
+
+    fun observeExpenses(vehicleId: Long): Flow<List<ExpenseEntity>> =
+        db.expenseDao().observeByVehicle(vehicleId)
 
     suspend fun addVehicle(
         name: String,
@@ -85,12 +101,10 @@ class AutologRepository(private val db: AutologDatabase) {
         pricePerLiter: Double,
         isTankFull: Boolean,
         stationName: String?,
+        fuelType: String?,
     ): Result<Unit> {
         val existing = db.refuellingDao().getById(id)
             ?: return Result.failure(IllegalArgumentException("Заправка не найдена"))
-        val vehicle = db.vehicleDao().getById(existing.vehicleId)
-            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
-        val now = System.currentTimeMillis()
         val siblings = db.refuellingDao().getByVehicle(existing.vehicleId)
             .filter { it.id != id }
         val updated = existing.copy(
@@ -100,27 +114,12 @@ class AutologRepository(private val db: AutologDatabase) {
             totalCost = volumeLiters * pricePerLiter,
             isTankFull = isTankFull,
             stationName = stationName?.trim()?.ifEmpty { null },
+            fuelType = fuelType,
             consumptionLPer100Km = null,
         )
-        val withConsumption = if (isTankFull) {
-            val allNewest = (listOf(updated) + siblings).sortedByDescending { it.odometerKm }
-            val fullNewest = allNewest.filter { it.isTankFull }.map {
-                FullTankPoint(it.odometerKm, it.dateEpochMs)
-            }
-            val points = allNewest.map {
-                RefuelPoint(it.odometerKm, it.volumeLiters, it.dateEpochMs)
-            }
-            val segment = ConsumptionCalculator.lastFullTankSegment(fullNewest, points)
-            updated.copy(consumptionLPer100Km = segment?.litersPer100Km)
-        } else {
-            updated
-        }
+        val withConsumption = applyConsumption(updated, siblings)
         db.refuellingDao().update(withConsumption)
-        val maxOdo = (listOf(withConsumption) + siblings).maxOf { it.odometerKm }
-            .coerceAtLeast(vehicle.currentOdometerKm)
-        db.vehicleDao().update(
-            vehicle.copy(currentOdometerKm = maxOdo, updatedAtEpochMs = now),
-        )
+        syncVehicleOdometer(existing.vehicleId)
         refreshRemindersForVehicle(existing.vehicleId)
         return Result.success(Unit)
     }
@@ -132,12 +131,10 @@ class AutologRepository(private val db: AutologDatabase) {
         pricePerLiter: Double,
         isTankFull: Boolean,
         stationName: String?,
+        fuelType: String?,
     ): Result<Long> {
         val vehicle = db.vehicleDao().getById(vehicleId)
             ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
-        if (odometerKm < vehicle.currentOdometerKm) {
-            return Result.failure(IllegalArgumentException("Пробег меньше текущего"))
-        }
         val now = System.currentTimeMillis()
         val existing = db.refuellingDao().getByVehicle(vehicleId)
         val draft = RefuellingEntity(
@@ -149,30 +146,18 @@ class AutologRepository(private val db: AutologDatabase) {
             totalCost = volumeLiters * pricePerLiter,
             isTankFull = isTankFull,
             stationName = stationName?.trim()?.ifEmpty { null },
+            fuelType = fuelType,
             consumptionLPer100Km = null,
             createdAtEpochMs = now,
         )
-        val withConsumption = if (isTankFull) {
-            val allNewest = listOf(draft) + existing
-            val fullNewest = allNewest.filter { it.isTankFull }.map {
-                FullTankPoint(it.odometerKm, it.dateEpochMs)
-            }
-            val points = allNewest.map {
-                RefuelPoint(it.odometerKm, it.volumeLiters, it.dateEpochMs)
-            }
-            val segment = ConsumptionCalculator.lastFullTankSegment(fullNewest, points)
-            draft.copy(consumptionLPer100Km = segment?.litersPer100Km)
-        } else {
-            draft
-        }
-
+        val withConsumption = applyConsumption(draft, existing)
         val id = db.refuellingDao().insert(withConsumption)
-        db.vehicleDao().update(
-            vehicle.copy(
-                currentOdometerKm = odometerKm,
-                updatedAtEpochMs = now,
-            ),
-        )
+        if (!fuelType.isNullOrBlank() && fuelType != vehicle.fuelTypeDefault) {
+            db.vehicleDao().update(
+                vehicle.copy(fuelTypeDefault = fuelType, updatedAtEpochMs = now),
+            )
+        }
+        syncVehicleOdometer(vehicleId)
         refreshRemindersForVehicle(vehicleId)
         return Result.success(id)
     }
@@ -240,9 +225,189 @@ class AutologRepository(private val db: AutologDatabase) {
         return Result.success(id)
     }
 
+    suspend fun updateReminder(
+        id: Long,
+        title: String,
+        intervalKm: Int?,
+        intervalDays: Int?,
+        lastChangeOdometerKm: Int,
+        lastChangeDateEpochMs: Long,
+        forecastFromFirstRecord: Boolean,
+        showPhoneNotifications: Boolean,
+        doneAtPurchase: Boolean,
+    ): Result<Unit> {
+        val existing = db.reminderDao().getById(id)
+            ?: return Result.failure(IllegalArgumentException("Напоминание не найдено"))
+        val vehicle = db.vehicleDao().getById(existing.vehicleId)
+            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
+        if (intervalKm == null && intervalDays == null) {
+            return Result.failure(IllegalArgumentException("Укажите км и/или дни"))
+        }
+        val now = System.currentTimeMillis()
+        val avg = avgKmPerDay(existing.vehicleId)
+        val forecast = ReminderForecast.compute(
+            ReminderForecast.Input(
+                currentOdometerKm = vehicle.currentOdometerKm,
+                baselineOdometerKm = lastChangeOdometerKm,
+                baselineDateEpochMs = lastChangeDateEpochMs,
+                intervalKm = intervalKm,
+                intervalDays = intervalDays,
+                avgKmPerDay = avg,
+                nowEpochMs = now,
+            ),
+        )
+        db.reminderDao().update(
+            existing.copy(
+                title = title.trim(),
+                intervalKm = intervalKm,
+                intervalDays = intervalDays,
+                baselineOdometerKm = lastChangeOdometerKm,
+                baselineDateEpochMs = lastChangeDateEpochMs,
+                forecastFromFirstRecord = forecastFromFirstRecord,
+                showPhoneNotifications = showPhoneNotifications,
+                doneAtPurchase = doneAtPurchase,
+                avgKmPerDay = forecast.avgKmPerDay,
+                remainingKm = forecast.remainingKm,
+                remainingDays = forecast.remainingDays,
+                nextDueDateEpochMs = forecast.nextDueDateEpochMs,
+                nextDueOdometerKm = forecast.nextDueOdometerKm,
+                updatedAtEpochMs = now,
+            ),
+        )
+        return Result.success(Unit)
+    }
+
+    suspend fun addExpense(
+        vehicleId: Long,
+        totalCost: Double,
+        category: String,
+        description: String?,
+        odometerKm: Int?,
+    ): Result<Long> {
+        db.vehicleDao().getById(vehicleId)
+            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
+        if (category.isBlank()) {
+            return Result.failure(IllegalArgumentException("Укажите категорию"))
+        }
+        if (totalCost < 0) {
+            return Result.failure(IllegalArgumentException("Сумма не может быть отрицательной"))
+        }
+        val now = System.currentTimeMillis()
+        val id = db.expenseDao().insert(
+            ExpenseEntity(
+                vehicleId = vehicleId,
+                dateEpochMs = now,
+                odometerKm = odometerKm,
+                totalCost = totalCost,
+                category = category.trim(),
+                description = description?.trim()?.ifEmpty { null },
+                createdAtEpochMs = now,
+            ),
+        )
+        return Result.success(id)
+    }
+
+    suspend fun updateExpense(
+        id: Long,
+        totalCost: Double,
+        category: String,
+        description: String?,
+        odometerKm: Int?,
+    ): Result<Unit> {
+        val existing = db.expenseDao().getById(id)
+            ?: return Result.failure(IllegalArgumentException("Расход не найден"))
+        if (category.isBlank()) {
+            return Result.failure(IllegalArgumentException("Укажите категорию"))
+        }
+        if (totalCost < 0) {
+            return Result.failure(IllegalArgumentException("Сумма не может быть отрицательной"))
+        }
+        db.expenseDao().update(
+            existing.copy(
+                totalCost = totalCost,
+                category = category.trim(),
+                description = description?.trim()?.ifEmpty { null },
+                odometerKm = odometerKm,
+            ),
+        )
+        return Result.success(Unit)
+    }
+
+    suspend fun addService(
+        vehicleId: Long,
+        odometerKm: Int,
+        totalCost: Double,
+        serviceType: String,
+        description: String?,
+        dateEpochMs: Long = System.currentTimeMillis(),
+        checklistJson: String? = null,
+        photoPathsJson: String? = null,
+    ): Result<Long> {
+        db.vehicleDao().getById(vehicleId)
+            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
+        if (serviceType.isBlank()) {
+            return Result.failure(IllegalArgumentException("Укажите тип сервиса"))
+        }
+        if (totalCost < 0) {
+            return Result.failure(IllegalArgumentException("Сумма не может быть отрицательной"))
+        }
+        val now = System.currentTimeMillis()
+        val id = db.serviceDao().insert(
+            ServiceEntity(
+                vehicleId = vehicleId,
+                dateEpochMs = dateEpochMs,
+                odometerKm = odometerKm,
+                totalCost = totalCost,
+                serviceType = serviceType.trim(),
+                description = description?.trim()?.ifEmpty { null },
+                checklistJson = checklistJson,
+                photoPathsJson = photoPathsJson,
+                createdAtEpochMs = now,
+            ),
+        )
+        syncVehicleOdometer(vehicleId)
+        refreshRemindersForVehicle(vehicleId)
+        return Result.success(id)
+    }
+
+    suspend fun updateService(
+        id: Long,
+        odometerKm: Int,
+        totalCost: Double,
+        serviceType: String,
+        description: String?,
+        dateEpochMs: Long,
+        checklistJson: String? = null,
+        photoPathsJson: String? = null,
+    ): Result<Unit> {
+        val existing = db.serviceDao().getById(id)
+            ?: return Result.failure(IllegalArgumentException("Сервис не найден"))
+        if (serviceType.isBlank()) {
+            return Result.failure(IllegalArgumentException("Укажите тип сервиса"))
+        }
+        if (totalCost < 0) {
+            return Result.failure(IllegalArgumentException("Сумма не может быть отрицательной"))
+        }
+        db.serviceDao().update(
+            existing.copy(
+                odometerKm = odometerKm,
+                totalCost = totalCost,
+                serviceType = serviceType.trim(),
+                description = description?.trim()?.ifEmpty { null },
+                dateEpochMs = dateEpochMs,
+                checklistJson = checklistJson,
+                photoPathsJson = photoPathsJson,
+            ),
+        )
+        syncVehicleOdometer(existing.vehicleId)
+        refreshRemindersForVehicle(existing.vehicleId)
+        return Result.success(Unit)
+    }
+
     suspend fun deleteRefuelling(id: Long) {
         val item = db.refuellingDao().getById(id) ?: return
         db.refuellingDao().delete(item)
+        syncVehicleOdometer(item.vehicleId)
         refreshRemindersForVehicle(item.vehicleId)
     }
 
@@ -251,10 +416,250 @@ class AutologRepository(private val db: AutologDatabase) {
         db.reminderDao().delete(item)
     }
 
+    suspend fun deleteExpense(id: Long) {
+        val item = db.expenseDao().getById(id) ?: return
+        db.expenseDao().delete(item)
+    }
+
+    suspend fun deleteService(id: Long) {
+        val item = db.serviceDao().getById(id) ?: return
+        db.serviceDao().delete(item)
+        syncVehicleOdometer(item.vehicleId)
+        refreshRemindersForVehicle(item.vehicleId)
+    }
+
     suspend fun getRefuelling(id: Long) = db.refuellingDao().getById(id)
 
     suspend fun getReminder(id: Long) = db.reminderDao().getById(id)
 
+    suspend fun getExpense(id: Long) = db.expenseDao().getById(id)
+
+    suspend fun getService(id: Long) = db.serviceDao().getById(id)
+
+    /** Full local backup as JSON (vehicles + children). */
+    suspend fun exportBackupJson(): String {
+        val root = org.json.JSONObject()
+        root.put("version", 1)
+        root.put("exportedAtEpochMs", System.currentTimeMillis())
+        val vehiclesArr = org.json.JSONArray()
+        db.vehicleDao().getAll().forEach { v ->
+            val vo = org.json.JSONObject()
+            vo.put("name", v.name)
+            vo.put("manufacturer", v.manufacturer)
+            vo.put("model", v.model)
+            vo.put("plate", v.plate)
+            vo.put("currentOdometerKm", v.currentOdometerKm)
+            vo.put("tankCapacityLiters", v.tankCapacityLiters)
+            vo.put("year", v.year)
+            vo.put("fuelTypeDefault", v.fuelTypeDefault)
+            vo.put("isActive", v.isActive)
+            vo.put("createdAtEpochMs", v.createdAtEpochMs)
+            vo.put("updatedAtEpochMs", v.updatedAtEpochMs)
+
+            val refuels = org.json.JSONArray()
+            db.refuellingDao().getByVehicle(v.id).forEach { r ->
+                refuels.put(
+                    org.json.JSONObject()
+                        .put("dateEpochMs", r.dateEpochMs)
+                        .put("odometerKm", r.odometerKm)
+                        .put("volumeLiters", r.volumeLiters)
+                        .put("pricePerLiter", r.pricePerLiter)
+                        .put("totalCost", r.totalCost)
+                        .put("fuelType", r.fuelType)
+                        .put("isTankFull", r.isTankFull)
+                        .put("stationName", r.stationName)
+                        .put("note", r.note)
+                        .put("consumptionLPer100Km", r.consumptionLPer100Km)
+                        .put("createdAtEpochMs", r.createdAtEpochMs),
+                )
+            }
+            vo.put("refuellings", refuels)
+
+            val expenses = org.json.JSONArray()
+            db.expenseDao().getByVehicle(v.id).forEach { e ->
+                expenses.put(
+                    org.json.JSONObject()
+                        .put("dateEpochMs", e.dateEpochMs)
+                        .put("odometerKm", e.odometerKm)
+                        .put("totalCost", e.totalCost)
+                        .put("category", e.category)
+                        .put("description", e.description)
+                        .put("createdAtEpochMs", e.createdAtEpochMs),
+                )
+            }
+            vo.put("expenses", expenses)
+
+            val services = org.json.JSONArray()
+            db.serviceDao().getByVehicleOldestFirst(v.id).forEach { s ->
+                services.put(
+                    org.json.JSONObject()
+                        .put("dateEpochMs", s.dateEpochMs)
+                        .put("odometerKm", s.odometerKm)
+                        .put("totalCost", s.totalCost)
+                        .put("serviceType", s.serviceType)
+                        .put("description", s.description)
+                        .put("checklistJson", s.checklistJson)
+                        .put("photoPathsJson", s.photoPathsJson)
+                        .put("doneAtPurchase", s.doneAtPurchase)
+                        .put("createdAtEpochMs", s.createdAtEpochMs),
+                )
+            }
+            vo.put("services", services)
+
+            val reminders = org.json.JSONArray()
+            db.reminderDao().getByVehicle(v.id).forEach { rem ->
+                reminders.put(
+                    org.json.JSONObject()
+                        .put("title", rem.title)
+                        .put("intervalKm", rem.intervalKm)
+                        .put("intervalDays", rem.intervalDays)
+                        .put("baselineOdometerKm", rem.baselineOdometerKm)
+                        .put("baselineDateEpochMs", rem.baselineDateEpochMs)
+                        .put("forecastFromFirstRecord", rem.forecastFromFirstRecord)
+                        .put("showPhoneNotifications", rem.showPhoneNotifications)
+                        .put("doneAtPurchase", rem.doneAtPurchase)
+                        .put("avgKmPerDay", rem.avgKmPerDay)
+                        .put("remainingKm", rem.remainingKm)
+                        .put("remainingDays", rem.remainingDays)
+                        .put("nextDueDateEpochMs", rem.nextDueDateEpochMs)
+                        .put("nextDueOdometerKm", rem.nextDueOdometerKm)
+                        .put("isActive", rem.isActive)
+                        .put("createdAtEpochMs", rem.createdAtEpochMs)
+                        .put("updatedAtEpochMs", rem.updatedAtEpochMs),
+                )
+            }
+            vo.put("reminders", reminders)
+            vehiclesArr.put(vo)
+        }
+        root.put("vehicles", vehiclesArr)
+        return root.toString(2)
+    }
+
+    /**
+     * Replace local DB with backup contents.
+     * Only call after explicit user confirmation in Settings.
+     */
+    suspend fun restoreBackupJson(json: String): Result<Unit> = runCatching {
+        val root = org.json.JSONObject(json)
+        val vehicles = root.getJSONArray("vehicles")
+        db.clearAllTables()
+        var firstId: Long? = null
+        for (i in 0 until vehicles.length()) {
+            val vo = vehicles.getJSONObject(i)
+            val now = System.currentTimeMillis()
+            val newId = db.vehicleDao().insert(
+                VehicleEntity(
+                    name = vo.getString("name"),
+                    manufacturer = vo.optString("manufacturer").ifBlank { null },
+                    model = vo.optString("model").ifBlank { null },
+                    plate = vo.optString("plate").ifBlank { null },
+                    currentOdometerKm = vo.getInt("currentOdometerKm"),
+                    tankCapacityLiters = vo.getDouble("tankCapacityLiters"),
+                    year = if (vo.has("year") && !vo.isNull("year")) vo.getInt("year") else null,
+                    fuelTypeDefault = vo.optString("fuelTypeDefault").ifBlank { null },
+                    isActive = false,
+                    createdAtEpochMs = vo.optLong("createdAtEpochMs", now),
+                    updatedAtEpochMs = vo.optLong("updatedAtEpochMs", now),
+                ),
+            )
+            if (firstId == null) firstId = newId
+
+            val refuels = vo.optJSONArray("refuellings")
+            if (refuels != null) {
+                for (j in 0 until refuels.length()) {
+                    val r = refuels.getJSONObject(j)
+                    db.refuellingDao().insert(
+                        RefuellingEntity(
+                            vehicleId = newId,
+                            dateEpochMs = r.getLong("dateEpochMs"),
+                            odometerKm = r.getInt("odometerKm"),
+                            volumeLiters = r.getDouble("volumeLiters"),
+                            pricePerLiter = r.getDouble("pricePerLiter"),
+                            totalCost = r.getDouble("totalCost"),
+                            fuelType = r.optString("fuelType").ifBlank { null },
+                            isTankFull = r.optBoolean("isTankFull", false),
+                            stationName = r.optString("stationName").ifBlank { null },
+                            note = r.optString("note").ifBlank { null },
+                            consumptionLPer100Km = if (r.has("consumptionLPer100Km") && !r.isNull("consumptionLPer100Km")) {
+                                r.getDouble("consumptionLPer100Km")
+                            } else {
+                                null
+                            },
+                            createdAtEpochMs = r.optLong("createdAtEpochMs", now),
+                        ),
+                    )
+                }
+            }
+
+            val expenses = vo.optJSONArray("expenses")
+            if (expenses != null) {
+                for (j in 0 until expenses.length()) {
+                    val e = expenses.getJSONObject(j)
+                    db.expenseDao().insert(
+                        ExpenseEntity(
+                            vehicleId = newId,
+                            dateEpochMs = e.getLong("dateEpochMs"),
+                            odometerKm = if (e.has("odometerKm") && !e.isNull("odometerKm")) e.getInt("odometerKm") else null,
+                            totalCost = e.getDouble("totalCost"),
+                            category = e.getString("category"),
+                            description = e.optString("description").ifBlank { null },
+                            createdAtEpochMs = e.optLong("createdAtEpochMs", now),
+                        ),
+                    )
+                }
+            }
+
+            val services = vo.optJSONArray("services")
+            if (services != null) {
+                for (j in 0 until services.length()) {
+                    val s = services.getJSONObject(j)
+                    db.serviceDao().insert(
+                        ServiceEntity(
+                            vehicleId = newId,
+                            dateEpochMs = s.getLong("dateEpochMs"),
+                            odometerKm = s.getInt("odometerKm"),
+                            totalCost = s.getDouble("totalCost"),
+                            serviceType = s.getString("serviceType"),
+                            description = s.optString("description").ifBlank { null },
+                            checklistJson = s.optString("checklistJson").ifBlank { null },
+                            photoPathsJson = s.optString("photoPathsJson").ifBlank { null },
+                            doneAtPurchase = s.optBoolean("doneAtPurchase", false),
+                            createdAtEpochMs = s.optLong("createdAtEpochMs", now),
+                        ),
+                    )
+                }
+            }
+
+            val reminders = vo.optJSONArray("reminders")
+            if (reminders != null) {
+                for (j in 0 until reminders.length()) {
+                    val rem = reminders.getJSONObject(j)
+                    db.reminderDao().insert(
+                        ReminderEntity(
+                            vehicleId = newId,
+                            title = rem.getString("title"),
+                            intervalKm = if (rem.has("intervalKm") && !rem.isNull("intervalKm")) rem.getInt("intervalKm") else null,
+                            intervalDays = if (rem.has("intervalDays") && !rem.isNull("intervalDays")) rem.getInt("intervalDays") else null,
+                            baselineOdometerKm = rem.getInt("baselineOdometerKm"),
+                            baselineDateEpochMs = rem.getLong("baselineDateEpochMs"),
+                            forecastFromFirstRecord = rem.optBoolean("forecastFromFirstRecord", false),
+                            showPhoneNotifications = rem.optBoolean("showPhoneNotifications", true),
+                            doneAtPurchase = rem.optBoolean("doneAtPurchase", false),
+                            avgKmPerDay = if (rem.has("avgKmPerDay") && !rem.isNull("avgKmPerDay")) rem.getDouble("avgKmPerDay") else null,
+                            remainingKm = if (rem.has("remainingKm") && !rem.isNull("remainingKm")) rem.getInt("remainingKm") else null,
+                            remainingDays = if (rem.has("remainingDays") && !rem.isNull("remainingDays")) rem.getInt("remainingDays") else null,
+                            nextDueDateEpochMs = if (rem.has("nextDueDateEpochMs") && !rem.isNull("nextDueDateEpochMs")) rem.getLong("nextDueDateEpochMs") else null,
+                            nextDueOdometerKm = if (rem.has("nextDueOdometerKm") && !rem.isNull("nextDueOdometerKm")) rem.getInt("nextDueOdometerKm") else null,
+                            isActive = rem.optBoolean("isActive", true),
+                            createdAtEpochMs = rem.optLong("createdAtEpochMs", now),
+                            updatedAtEpochMs = rem.optLong("updatedAtEpochMs", now),
+                        ),
+                    )
+                }
+            }
+        }
+        firstId?.let { db.vehicleDao().switchActive(it, System.currentTimeMillis()) }
+    }
 
     suspend fun refreshRemindersForVehicle(vehicleId: Long) {
         val vehicle = db.vehicleDao().getById(vehicleId) ?: return
@@ -285,6 +690,43 @@ class AutologRepository(private val db: AutologDatabase) {
         }
     }
 
+    /**
+     * Vehicle odometer = max(refuel odo, service odo).
+     * Backdated lower entries do not reduce current if a higher reading exists.
+     * If there are no mileage records, keep the vehicle value.
+     */
+    private suspend fun syncVehicleOdometer(vehicleId: Long) {
+        val vehicle = db.vehicleDao().getById(vehicleId) ?: return
+        val maxRefuel = db.refuellingDao().getByVehicle(vehicleId).maxOfOrNull { it.odometerKm }
+        val maxService = db.serviceDao().getByVehicleOldestFirst(vehicleId).maxOfOrNull { it.odometerKm }
+        val fromRecords = listOfNotNull(maxRefuel, maxService).maxOrNull()
+        val newOdo = fromRecords ?: vehicle.currentOdometerKm
+        if (newOdo != vehicle.currentOdometerKm) {
+            db.vehicleDao().update(
+                vehicle.copy(
+                    currentOdometerKm = newOdo,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    private fun applyConsumption(
+        draft: RefuellingEntity,
+        siblings: List<RefuellingEntity>,
+    ): RefuellingEntity {
+        if (!draft.isTankFull) return draft
+        val allNewest = listOf(draft) + siblings
+        val fullNewest = allNewest.filter { it.isTankFull }.map {
+            FullTankPoint(it.odometerKm, it.dateEpochMs)
+        }
+        val points = allNewest.map {
+            RefuelPoint(it.odometerKm, it.volumeLiters, it.dateEpochMs)
+        }
+        val segment = ConsumptionCalculator.lastFullTankSegment(fullNewest, points)
+        return draft.copy(consumptionLPer100Km = segment?.litersPer100Km)
+    }
+
     private suspend fun avgKmPerDay(vehicleId: Long): Double? {
         val refuels = db.refuellingDao().getByVehicle(vehicleId)
             .sortedBy { it.dateEpochMs }
@@ -302,6 +744,8 @@ class AutologRepository(private val db: AutologDatabase) {
         vehicle: VehicleEntity?,
         refuelsNewestFirst: List<RefuellingEntity>,
         reminders: List<ReminderEntity>,
+        expensesNewestFirst: List<ExpenseEntity>,
+        servicesNewestFirst: List<ServiceEntity>,
     ): DashboardSnapshot {
         if (vehicle == null) {
             return DashboardSnapshot.Empty
@@ -318,13 +762,66 @@ class AutologRepository(private val db: AutologDatabase) {
             allBetween = points,
         )?.litersPer100Km
 
+        val activeReminders = reminders.filter { it.isActive }
+        val timeline = buildTimeline(
+            refuels = refuelsNewestFirst.take(TIMELINE_PER_TYPE),
+            expenses = expensesNewestFirst.take(TIMELINE_PER_TYPE),
+            services = servicesNewestFirst.take(TIMELINE_PER_TYPE),
+        )
         return DashboardSnapshot.Data(
             vehicle = vehicle,
             averageConsumptionLPer100 = lifetime,
             lastConsumptionLPer100 = last,
             recentRefuellings = refuelsNewestFirst.take(5),
-            activeReminders = reminders.filter { it.isActive },
+            activeReminders = activeReminders,
+            recentExpenses = expensesNewestFirst.take(5),
+            recentServices = servicesNewestFirst.take(5),
+            timeline = timeline,
         )
+    }
+
+    private fun buildTimeline(
+        refuels: List<RefuellingEntity>,
+        expenses: List<ExpenseEntity>,
+        services: List<ServiceEntity>,
+    ): List<TimelineEntry> {
+        val entries = ArrayList<TimelineEntry>(
+            refuels.size + expenses.size + services.size,
+        )
+        refuels.forEach { entries += TimelineEntry.Refuel(it) }
+        expenses.forEach { entries += TimelineEntry.Expense(it) }
+        services.forEach { entries += TimelineEntry.Service(it) }
+        return entries.sortedByDescending { it.sortEpochMs }
+    }
+
+    companion object {
+        private const val TIMELINE_PER_TYPE = 30
+    }
+}
+
+sealed class TimelineEntry {
+    abstract val id: Long
+    abstract val sortEpochMs: Long
+
+    data class Refuel(val entity: RefuellingEntity) : TimelineEntry() {
+        override val id: Long get() = entity.id
+        override val sortEpochMs: Long get() = entity.dateEpochMs
+    }
+
+    data class Expense(val entity: ExpenseEntity) : TimelineEntry() {
+        override val id: Long get() = entity.id
+        override val sortEpochMs: Long get() = entity.dateEpochMs
+    }
+
+    data class Service(val entity: ServiceEntity) : TimelineEntry() {
+        override val id: Long get() = entity.id
+        override val sortEpochMs: Long get() = entity.dateEpochMs
+    }
+
+    data class Reminder(val entity: ReminderEntity) : TimelineEntry() {
+        override val id: Long get() = entity.id
+        override val sortEpochMs: Long
+            get() = entity.nextDueDateEpochMs ?: entity.createdAtEpochMs
     }
 }
 
@@ -336,5 +833,8 @@ sealed class DashboardSnapshot {
         val lastConsumptionLPer100: Double?,
         val recentRefuellings: List<RefuellingEntity>,
         val activeReminders: List<ReminderEntity>,
+        val recentExpenses: List<ExpenseEntity> = emptyList(),
+        val recentServices: List<ServiceEntity> = emptyList(),
+        val timeline: List<TimelineEntry> = emptyList(),
     ) : DashboardSnapshot()
 }

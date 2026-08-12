@@ -70,7 +70,11 @@ class DashboardViewModel(
         viewModelScope.launch { repository.deleteReminder(id) }
     }
 
-    fun deleteVehicle(id: Long) {
-        viewModelScope.launch { repository.deleteVehicle(id) }
+    fun deleteExpense(id: Long) {
+        viewModelScope.launch { repository.deleteExpense(id) }
+    }
+
+    fun deleteService(id: Long) {
+        viewModelScope.launch { repository.deleteService(id) }
     }
 }

@@ -7,7 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.automirrored.outlined.EventNote
+import androidx.compose.material.icons.outlined.CarRepair
+import androidx.compose.material.icons.outlined.Handyman
+import androidx.compose.material.icons.outlined.LocalCarWash
 import androidx.compose.material.icons.outlined.LocalGasStation
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Payments
@@ -20,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import ru.autolog.app.domain.ServiceKind
 import ru.autolog.app.ui.fluid.bouncePressable
 import ru.autolog.app.ui.glass.GlassPanel
 import ru.autolog.app.ui.glass.GlassShapeSmall
@@ -27,10 +31,49 @@ import ru.autolog.app.ui.theme.AutologColors
 
 enum class ActivityKind {
     REFUEL,
-    SERVICE,
+    /** Плановое ТО / обслуживание. */
+    TO,
+    /** Ремонт. */
+    REPAIR,
+    /** Запланированные работы. */
+    PLANNED,
+    /** Мойка. */
+    WASH,
+    /** Прочий расход. */
     EXPENSE,
     REMINDER,
+    /** Fallback / generic service (maps to TO icon). */
+    SERVICE,
 }
+
+fun ActivityKind.icon(): ImageVector = when (this) {
+    ActivityKind.REFUEL -> Icons.Outlined.LocalGasStation
+    ActivityKind.TO, ActivityKind.SERVICE -> Icons.Outlined.Handyman
+    ActivityKind.REPAIR -> Icons.Outlined.CarRepair
+    ActivityKind.PLANNED -> Icons.AutoMirrored.Outlined.EventNote
+    ActivityKind.WASH -> Icons.Outlined.LocalCarWash
+    ActivityKind.EXPENSE -> Icons.Outlined.Payments
+    ActivityKind.REMINDER -> Icons.Outlined.NotificationsActive
+}
+
+fun ActivityKind.tint(): Color = when (this) {
+    ActivityKind.REFUEL -> AutologColors.Fuel
+    ActivityKind.TO, ActivityKind.SERVICE -> AutologColors.To
+    ActivityKind.REPAIR -> AutologColors.Repair
+    ActivityKind.PLANNED -> AutologColors.Planned
+    ActivityKind.WASH -> AutologColors.Wash
+    ActivityKind.EXPENSE -> AutologColors.Expense
+    ActivityKind.REMINDER -> AutologColors.Reminder
+}
+
+fun ServiceKind.toActivityKind(): ActivityKind = when (this) {
+    ServiceKind.TO -> ActivityKind.TO
+    ServiceKind.REPAIR -> ActivityKind.REPAIR
+    ServiceKind.PLANNED -> ActivityKind.PLANNED
+}
+
+fun expenseActivityKind(category: String): ActivityKind =
+    if (category.contains("мойк", ignoreCase = true)) ActivityKind.WASH else ActivityKind.EXPENSE
 
 @Composable
 fun ActivityFeedCard(
@@ -77,18 +120,4 @@ fun ActivityFeedCard(
             }
         }
     }
-}
-
-private fun ActivityKind.icon(): ImageVector = when (this) {
-    ActivityKind.REFUEL -> Icons.Outlined.LocalGasStation
-    ActivityKind.SERVICE -> Icons.Outlined.Build
-    ActivityKind.EXPENSE -> Icons.Outlined.Payments
-    ActivityKind.REMINDER -> Icons.Outlined.NotificationsActive
-}
-
-private fun ActivityKind.tint(): Color = when (this) {
-    ActivityKind.REFUEL -> AutologColors.Fuel
-    ActivityKind.SERVICE -> AutologColors.Service
-    ActivityKind.EXPENSE -> AutologColors.Expense
-    ActivityKind.REMINDER -> AutologColors.Reminder
 }

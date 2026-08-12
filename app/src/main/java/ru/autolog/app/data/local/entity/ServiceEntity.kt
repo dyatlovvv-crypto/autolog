@@ -27,9 +27,13 @@ data class ServiceEntity(
     val dateEpochMs: Long,
     val odometerKm: Int,
     val totalCost: Double,
-    /** e.g. oil, filters, tires, inspection */
+    /** ServiceKind.name: TO / REPAIR / PLANNED */
     val serviceType: String,
     val description: String? = null,
+    /** JSON array of {id,text,done} checklist items. */
+    val checklistJson: String? = null,
+    /** JSON array of absolute local photo paths. */
+    val photoPathsJson: String? = null,
     /** Baseline service performed at vehicle purchase. */
     val doneAtPurchase: Boolean = false,
     /** Optional link to the reminder this service closed. */

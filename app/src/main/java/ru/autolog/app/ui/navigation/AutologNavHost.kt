@@ -1,23 +1,40 @@
 package ru.autolog.app.ui.navigation
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.Modifier
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import ru.autolog.app.domain.ServiceKind
 import ru.autolog.app.ui.AutologViewModelFactory
+import ru.autolog.app.ui.analytics.AnalyticsScreen
 import ru.autolog.app.ui.dashboard.DashboardScreen
 import ru.autolog.app.ui.dashboard.DashboardViewModel
-import ru.autolog.app.ui.feed.RefuelDetailScreen
-import ru.autolog.app.ui.feed.ReminderDetailScreen
+import ru.autolog.app.ui.expense.ExpenseScreen
 import ru.autolog.app.ui.fluid.FluidNavTransitions
+import ru.autolog.app.ui.history.HistoryFilter
+import ru.autolog.app.ui.history.HistoryScreen
 import ru.autolog.app.ui.map.GasStationMapScreen
 import ru.autolog.app.ui.refuel.AddRefuelScreen
 import ru.autolog.app.ui.reminder.AddReminderScreen
+import ru.autolog.app.ui.service.ServiceScreen
 import ru.autolog.app.ui.vehicle.AddVehicleScreen
 
 @Composable
@@ -25,6 +42,9 @@ fun AutologNavHost() {
     val navController = rememberNavController()
     val dashboardVm: DashboardViewModel = viewModel(factory = AutologViewModelFactory())
     val dashState by dashboardVm.uiState.collectAsStateWithLifecycle()
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val activity = LocalContext.current as? ComponentActivity
+    var showExitDialog by remember { mutableStateOf(false) }
 
     val start = if (!dashState.loading && dashState.vehicles.isEmpty()) {
         Routes.ADD_VEHICLE
@@ -33,6 +53,55 @@ fun AutologNavHost() {
     }
 
     if (dashState.loading) return
+
+    // After deleting the last vehicle, open AddVehicle from any screen.
+    LaunchedEffect(dashState.loading, dashState.vehicles.size) {
+        if (dashState.loading || dashState.vehicles.isNotEmpty()) return@LaunchedEffect
+        val route = navController.currentBackStackEntry?.destination?.route
+        if (route == Routes.ADD_VEHICLE) return@LaunchedEffect
+        navController.navigate(Routes.ADD_VEHICLE) {
+            popUpTo(Routes.DASHBOARD) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
+    fun handleSystemBack() {
+        val current = backStackEntry?.destination?.route
+        val canPop = navController.previousBackStackEntry != null &&
+            current != Routes.DASHBOARD &&
+            !(current == Routes.ADD_VEHICLE && dashState.vehicles.isEmpty())
+        if (canPop) {
+            navController.popBackStack()
+        } else {
+            showExitDialog = true
+        }
+    }
+
+    BackHandler {
+        handleSystemBack()
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            title = { Text("Точно выйти?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showExitDialog = false
+                        activity?.finish()
+                    },
+                    modifier = Modifier.testTag("exit_confirm"),
+                ) { Text("Атвичаю") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showExitDialog = false },
+                    modifier = Modifier.testTag("exit_cancel"),
+                ) { Text("Ни в коем случае") }
+            },
+        )
+    }
 
     NavHost(
         navController = navController,
@@ -48,8 +117,52 @@ fun AutologNavHost() {
                 onAddVehicle = { navController.navigate(Routes.ADD_VEHICLE) },
                 onAddRefuel = { navController.navigate(Routes.ADD_REFUEL) },
                 onAddReminder = { navController.navigate(Routes.ADD_REMINDER) },
+                onAddService = { kind -> navController.navigate(Routes.addService(kind.name)) },
+                onAddWash = { navController.navigate(Routes.ADD_EXPENSE_WASH) },
+                onOpenServiceHistory = { filter ->
+                    navController.navigate(Routes.history(filter.name))
+                },
+                onOpenAnalytics = { navController.navigate(Routes.ANALYTICS) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenRefuel = { id -> navController.navigate(Routes.refuelDetail(id)) },
                 onOpenReminder = { id -> navController.navigate(Routes.reminderDetail(id)) },
+                onOpenExpense = { id -> navController.navigate(Routes.expenseDetail(id)) },
+                onOpenService = { id -> navController.navigate(Routes.serviceDetail(id)) },
+                onEditService = { id -> navController.navigate(Routes.serviceEdit(id)) },
+            )
+        }
+        composable(Routes.HISTORY) {
+            HistoryScreen(
+                onBack = { navController.popBackStack() },
+                onOpenRefuel = { id -> navController.navigate(Routes.refuelDetail(id)) },
+                onOpenService = { id ->
+                    navController.navigate(Routes.serviceDetail(id))
+                },
+                onOpenExpense = { id -> navController.navigate(Routes.expenseDetail(id)) },
+            )
+        }
+        composable(
+            Routes.HISTORY_FILTERED,
+            arguments = listOf(navArgument("filter") { type = NavType.StringType }),
+        ) { entry ->
+            val filter = HistoryFilter.fromArg(entry.arguments?.getString("filter"))
+            HistoryScreen(
+                initialFilter = filter,
+                serviceHubMode = true,
+                onBack = { navController.popBackStack() },
+                onOpenRefuel = { id -> navController.navigate(Routes.refuelDetail(id)) },
+                onOpenService = { id -> navController.navigate(Routes.serviceDetail(id)) },
+                onOpenExpense = { id -> navController.navigate(Routes.expenseDetail(id)) },
+            )
+        }
+        composable(Routes.ANALYTICS) {
+            AnalyticsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.SETTINGS) {
+            ru.autolog.app.ui.settings.SettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
         composable(Routes.ADD_VEHICLE) {
@@ -60,7 +173,11 @@ fun AutologNavHost() {
                         launchSingleTop = true
                     }
                 },
-                onBack = if (dashState.vehicles.isEmpty()) null else ({ navController.popBackStack() }),
+                onBack = if (dashState.vehicles.isEmpty()) {
+                    { showExitDialog = true }
+                } else {
+                    { navController.popBackStack() }
+                },
             )
         }
         composable(Routes.ADD_REFUEL) { entry ->
@@ -88,15 +205,43 @@ fun AutologNavHost() {
                 onBack = { navController.popBackStack() },
             )
         }
+        composable(Routes.ADD_EXPENSE) {
+            ExpenseScreen(
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.ADD_EXPENSE_WASH) {
+            ExpenseScreen(
+                fixedCategory = "Мойка",
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            Routes.ADD_SERVICE,
+            arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+        ) { entry ->
+            val kindName = entry.arguments?.getString("kind") ?: ServiceKind.TO.name
+            val kind = ServiceKind.fromStorage(kindName)
+            ServiceScreen(
+                fixedKind = kind,
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+            )
+        }
         composable(
             Routes.REFUEL_DETAIL,
             arguments = listOf(navArgument("id") { type = NavType.LongType }),
         ) { entry ->
             val id = entry.arguments?.getLong("id") ?: return@composable
-            RefuelDetailScreen(
-                refuelId = id,
+            AddRefuelScreen(
+                editRefuelId = id,
+                onSaved = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
                 onDeleted = { navController.popBackStack() },
+                onPickStationOnMap = { navController.navigate(Routes.GAS_MAP) },
+                backStackEntry = entry,
             )
         }
         composable(
@@ -104,8 +249,47 @@ fun AutologNavHost() {
             arguments = listOf(navArgument("id") { type = NavType.LongType }),
         ) { entry ->
             val id = entry.arguments?.getLong("id") ?: return@composable
-            ReminderDetailScreen(
-                reminderId = id,
+            AddReminderScreen(
+                editReminderId = id,
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+                onDeleted = { navController.popBackStack() },
+            )
+        }
+        composable(
+            Routes.EXPENSE_DETAIL,
+            arguments = listOf(navArgument("id") { type = NavType.LongType }),
+        ) { entry ->
+            val id = entry.arguments?.getLong("id") ?: return@composable
+            ExpenseScreen(
+                editExpenseId = id,
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+                onDeleted = { navController.popBackStack() },
+            )
+        }
+        composable(
+            Routes.SERVICE_DETAIL,
+            arguments = listOf(navArgument("id") { type = NavType.LongType }),
+        ) { entry ->
+            val id = entry.arguments?.getLong("id") ?: return@composable
+            ServiceScreen(
+                editServiceId = id,
+                startReadOnly = true,
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+                onDeleted = { navController.popBackStack() },
+            )
+        }
+        composable(
+            Routes.SERVICE_EDIT,
+            arguments = listOf(navArgument("id") { type = NavType.LongType }),
+        ) { entry ->
+            val id = entry.arguments?.getLong("id") ?: return@composable
+            ServiceScreen(
+                editServiceId = id,
+                startReadOnly = false,
+                onSaved = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
                 onDeleted = { navController.popBackStack() },
             )

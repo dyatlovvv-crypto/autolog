@@ -6,8 +6,6 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import ru.autolog.app.AutologApp
 import ru.autolog.app.data.repository.AutologRepository
 import ru.autolog.app.ui.dashboard.DashboardViewModel
-import ru.autolog.app.ui.refuel.AddRefuelViewModel
-import ru.autolog.app.ui.reminder.AddReminderViewModel
 import ru.autolog.app.ui.vehicle.AddVehicleViewModel
 
 class AutologViewModelFactory(
@@ -20,10 +18,6 @@ class AutologViewModelFactory(
                 DashboardViewModel(repository) as T
             modelClass.isAssignableFrom(AddVehicleViewModel::class.java) ->
                 AddVehicleViewModel(repository) as T
-            modelClass.isAssignableFrom(AddRefuelViewModel::class.java) ->
-                AddRefuelViewModel(repository) as T
-            modelClass.isAssignableFrom(AddReminderViewModel::class.java) ->
-                AddReminderViewModel(repository) as T
             else -> throw IllegalArgumentException("Unknown ViewModel: ${modelClass.name}")
         }
     }

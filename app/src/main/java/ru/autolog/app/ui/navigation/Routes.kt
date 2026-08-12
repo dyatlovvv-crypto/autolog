@@ -2,13 +2,28 @@ package ru.autolog.app.ui.navigation
 
 object Routes {
     const val DASHBOARD = "dashboard"
+    const val HISTORY = "history"
+    const val HISTORY_FILTERED = "history/{filter}"
+    const val ANALYTICS = "analytics"
+    const val SETTINGS = "settings"
     const val ADD_VEHICLE = "add_vehicle"
     const val ADD_REFUEL = "add_refuel"
     const val ADD_REMINDER = "add_reminder"
+    const val ADD_EXPENSE = "add_expense"
+    const val ADD_EXPENSE_WASH = "add_expense_wash"
+    const val ADD_SERVICE = "add_service/{kind}"
     const val GAS_MAP = "gas_map"
     const val REFUEL_DETAIL = "refuel/{id}"
     const val REMINDER_DETAIL = "reminder/{id}"
+    const val EXPENSE_DETAIL = "expense/{id}"
+    const val SERVICE_DETAIL = "service/{id}"
+    const val SERVICE_EDIT = "service_edit/{id}"
 
+    fun addService(kind: String) = "add_service/$kind"
+    fun history(filter: String) = "history/$filter"
     fun refuelDetail(id: Long) = "refuel/$id"
     fun reminderDetail(id: Long) = "reminder/$id"
+    fun expenseDetail(id: Long) = "expense/$id"
+    fun serviceDetail(id: Long) = "service/$id"
+    fun serviceEdit(id: Long) = "service_edit/$id"
 }

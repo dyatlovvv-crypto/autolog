@@ -8,11 +8,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import ru.autolog.app.data.settings.AppPalette
+import ru.autolog.app.data.settings.UserSettings
 import ru.autolog.app.notifications.ReminderCheckWorker
 import ru.autolog.app.notifications.ReminderNotifications
 import ru.autolog.app.ui.glass.LiquidMeshBackground
@@ -80,8 +85,19 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AutologAppRoot() {
-    AutologTheme {
-        LiquidMeshBackground(modifier = Modifier.fillMaxSize()) {
+    val settings by AutologApp.instance.container.settingsStore.settings
+        .collectAsStateWithLifecycle(initialValue = UserSettings())
+    val systemDark = isSystemInDarkTheme()
+    val darkTheme = when (settings.palette) {
+        AppPalette.AMOLED -> true
+        else -> systemDark
+    }
+    AutologTheme(palette = settings.palette, darkTheme = darkTheme) {
+        LiquidMeshBackground(
+            modifier = Modifier.fillMaxSize(),
+            mode = settings.background,
+            customUri = settings.customBackgroundUri,
+        ) {
             AutologNavHost()
         }
     }

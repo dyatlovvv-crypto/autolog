@@ -41,6 +41,9 @@ interface ReminderDao {
     )
     suspend fun getActiveByVehicle(vehicleId: Long): List<ReminderEntity>
 
+    @Query("SELECT * FROM reminders WHERE vehicleId = :vehicleId")
+    suspend fun getByVehicle(vehicleId: Long): List<ReminderEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(reminder: ReminderEntity): Long
 

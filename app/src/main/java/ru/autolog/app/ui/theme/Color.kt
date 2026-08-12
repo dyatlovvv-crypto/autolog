@@ -19,7 +19,11 @@ object AutologColors {
 
     val Fuel = Color(0xFFEF6C00)
     val Service = Color(0xFF2E7D32)
-    val Expense = Color(0xFF6A1B9A)
+    val To = Color(0xFF2E7D32)
+    val Repair = Color(0xFFC62828)
+    val Planned = Color(0xFF6A1B9A)
+    val Wash = Color(0xFF00838F)
+    val Expense = Color(0xFF5E35B1)
     val Reminder = Color(0xFF0277BD)
 
     /** Mesh blobs behind glass. */
