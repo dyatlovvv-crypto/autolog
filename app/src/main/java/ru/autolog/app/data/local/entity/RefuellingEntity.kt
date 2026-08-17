@@ -17,9 +17,9 @@ import androidx.room.PrimaryKey
     ],
     indices = [
         Index("vehicleId"),
-        Index("odometerKm"),
         Index("dateEpochMs"),
         Index(value = ["vehicleId", "dateEpochMs"]),
+        Index(value = ["vehicleId", "isTankFull", "dateEpochMs"]),
     ],
 )
 data class RefuellingEntity(

@@ -1,10 +1,11 @@
 package ru.autolog.app.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,7 +16,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
@@ -33,6 +34,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -49,26 +51,32 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ru.autolog.app.ui.theme.AutologElevation
+import ru.autolog.app.ui.theme.AutologRadii
+import ru.autolog.app.ui.theme.AutologSpace
 
 object TimelineTags {
     fun item(kind: String, id: Long) = "timeline_item_${kind}_$id"
     fun actionDelete(kind: String, id: Long) = "timeline_action_delete_${kind}_$id"
     fun actionEdit(kind: String, id: Long) = "timeline_action_edit_${kind}_$id"
     fun actionView(kind: String, id: Long) = "timeline_action_view_${kind}_$id"
+    fun roadKm(kind: String, id: Long) = "timeline_road_km_${kind}_$id"
     const val DELETE_CONFIRM = "timeline_delete_confirm"
 }
 
 private val RoadAsphalt = Color(0xFF4A525A)
 private val RoadMarking = Color(0xFFF5F7FA)
 
-/** Continuous asphalt strip for gaps between timeline rows (e.g. month headers). */
+val RoadKmGutter = AutologSpace.xl
+
 @Composable
 fun TimelineRoadConnector(
     modifier: Modifier = Modifier,
     alpha: Float = 0.85f,
 ) {
-    Canvas(modifier = modifier.width(40.dp)) {
+    Canvas(modifier = modifier.width(AutologSpace.xl)) {
         drawTimelineRoad(
             topY = 0f,
             bottomY = size.height,
@@ -80,11 +88,36 @@ fun TimelineRoadConnector(
     }
 }
 
+@Composable
+internal fun TimelineKmPost(
+    km: Int?,
+    label: String?,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.padding(top = AutologSpace.lg),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        if (km != null && km > 0 && !label.isNullOrBlank()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
+                Text(
+                    text = "км",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
 
-/**
- * Drivvo-style timeline row: two-lane dashed road + circular icon + expandable body
- * with View / Edit / Delete.
- */
 @Composable
 fun ExpandableTimelineItem(
     kind: ActivityKind,
@@ -101,6 +134,11 @@ fun ExpandableTimelineItem(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    dateText: String? = null,
+    kmText: String? = null,
+    moneyText: String? = null,
+    roadKm: Int? = null,
+    roadKmLabel: String? = null,
 ) {
     val tint = kind.tint()
     val icon = kind.icon()
@@ -111,103 +149,167 @@ fun ExpandableTimelineItem(
         label = "roadAlpha",
     )
 
-    Row(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(IntrinsicSize.Min)
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            )
             .testTag(TimelineTags.item(kindKey, id)),
     ) {
-        TimelineRoadRail(
-            tint = tint,
-            icon = { Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp)) },
-            isFirst = isFirst,
-            isLast = isLast,
-            alpha = roadAlpha,
-            modifier = Modifier
-                .width(40.dp)
-                .fillMaxHeight(),
-        )
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(start = 4.dp, end = 4.dp, bottom = if (isLast) 8.dp else 4.dp)
-                .clip(MaterialTheme.shapes.medium)
-                .clickable(onClick = onToggle)
-                .padding(horizontal = 8.dp, vertical = 10.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandVertically(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
-                ) + fadeIn(),
-                exit = shrinkVertically(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMediumLow,
-                    ),
-                ) + fadeOut(),
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Spacer(modifier = Modifier.width(AutologSpace.xl + RoadKmGutter))
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(bottom = if (isLast) AutologSpace.sm else AutologSpace.xs)
+                    .clip(RoundedCornerShape(AutologRadii.card))
+                    .clickable(onClick = onToggle),
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                shape = RoundedCornerShape(AutologRadii.card),
+                tonalElevation = AutologElevation.card,
+                shadowElevation = 0.dp,
             ) {
-                Column {
-                    if (detailLines.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        detailLines.forEach { line ->
+                Column(modifier = Modifier.padding(AutologSpace.md)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (!dateText.isNullOrBlank() || !kmText.isNullOrBlank() || !moneyText.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = AutologSpace.xs),
+                        horizontalArrangement = Arrangement.spacedBy(AutologSpace.sm),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        dateText?.takeIf { it.isNotBlank() }?.let {
                             Text(
-                                text = line,
-                                style = MaterialTheme.typography.bodySmall,
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        kmText?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        moneyText?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        IconButton(
-                            onClick = { confirmDelete = true },
-                            modifier = Modifier.testTag(TimelineTags.actionDelete(kindKey, id)),
-                        ) {
-                            Icon(
-                                Icons.Outlined.Delete,
-                                contentDescription = "Удалить",
-                                tint = MaterialTheme.colorScheme.error,
-                            )
+                } else {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = AutologSpace.xs),
+                    )
+                }
+                AnimatedVisibility(
+                    visible = expanded,
+                    enter = expandVertically(
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    ) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+                    exit = shrinkVertically(
+                        animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    ) + fadeOut(animationSpec = tween(160)),
+                ) {
+                    Column {
+                        if (detailLines.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(AutologSpace.sm))
+                            detailLines.forEachIndexed { lineIndex, line ->
+                                val accent = lineIndex == 0 && line.startsWith("С прошлого")
+                                Text(
+                                    text = line,
+                                    style = if (accent) {
+                                        MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    } else {
+                                        MaterialTheme.typography.bodyMedium
+                                    },
+                                    color = if (accent) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.padding(top = AutologSpace.xs),
+                                )
+                            }
                         }
-                        IconButton(
-                            onClick = onEdit,
-                            modifier = Modifier.testTag(TimelineTags.actionEdit(kindKey, id)),
+                        Spacer(modifier = Modifier.height(AutologSpace.sm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(AutologSpace.xs),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(Icons.Outlined.Edit, contentDescription = "Редактировать")
-                        }
-                        IconButton(
-                            onClick = onView,
-                            modifier = Modifier.testTag(TimelineTags.actionView(kindKey, id)),
-                        ) {
-                            Icon(Icons.Outlined.Visibility, contentDescription = "Просмотреть")
+                            IconButton(
+                                onClick = onView,
+                                modifier = Modifier.testTag(TimelineTags.actionView(kindKey, id)),
+                            ) {
+                                AccentIcon(
+                                    imageVector = Icons.Outlined.Visibility,
+                                    contentDescription = "Просмотреть",
+                                )
+                            }
+                            IconButton(
+                                onClick = onEdit,
+                                modifier = Modifier.testTag(TimelineTags.actionEdit(kindKey, id)),
+                            ) {
+                                AccentIcon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = "Редактировать",
+                                )
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = { confirmDelete = true },
+                                modifier = Modifier.testTag(TimelineTags.actionDelete(kindKey, id)),
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = "Удалить",
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                     }
                 }
+                }
             }
+        }
+        Row(modifier = Modifier.matchParentSize()) {
+            TimelineRoadRail(
+                tint = tint,
+                icon = {
+                    Icon(
+                        icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(AutologSpace.md),
+                    )
+                },
+                isFirst = isFirst,
+                isLast = isLast,
+                alpha = roadAlpha,
+                modifier = Modifier
+                    .width(AutologSpace.xl)
+                    .fillMaxHeight(),
+            )
+            TimelineKmPost(
+                km = roadKm,
+                label = roadKmLabel,
+                modifier = Modifier
+                    .width(RoadKmGutter)
+                    .fillMaxHeight()
+                    .testTag(TimelineTags.roadKm(kindKey, id)),
+            )
+            Spacer(modifier = Modifier.weight(1f))
         }
     }
 
@@ -251,9 +353,9 @@ private fun TimelineRoadRail(
         Canvas(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(40.dp),
+                .width(AutologSpace.xl),
         ) {
-            val iconCenterY = 22.dp.toPx()
+            val iconCenterY = AutologSpace.lg.toPx()
             val topY = if (isFirst) iconCenterY else 0f
             val bottomY = if (isLast) iconCenterY else size.height
             drawTimelineRoad(
@@ -267,8 +369,8 @@ private fun TimelineRoadRail(
         }
         Box(
             modifier = Modifier
-                .padding(top = 8.dp)
-                .size(28.dp)
+                .padding(top = AutologSpace.sm)
+                .size(AutologSpace.lg)
                 .clip(CircleShape)
                 .background(tint),
             contentAlignment = Alignment.Center,
@@ -289,9 +391,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimelineRoad(
     val height = (bottomY - topY).coerceAtLeast(0f)
     if (height <= 0f) return
 
-    val roadWidth = 16.dp.toPx()
+    val roadWidth = AutologSpace.md.toPx()
     val left = (size.width - roadWidth) / 2f
-    val corner = if (roundEnds) 4.dp.toPx() else 0f
+    val corner = if (roundEnds) AutologSpace.xs.toPx() else 0f
 
     drawRoundRect(
         color = asphalt,
@@ -300,7 +402,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimelineRoad(
         cornerRadius = androidx.compose.ui.geometry.CornerRadius(corner, corner),
     )
 
-    val edgeStroke = 1.4.dp.toPx()
+    val edgeStroke = AutologSpace.xs.toPx() / 4f
     drawLine(
         color = edge,
         start = Offset(left + edgeStroke, topY),
@@ -317,14 +419,14 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawTimelineRoad(
     )
 
     val dash = PathEffect.dashPathEffect(
-        floatArrayOf(10.dp.toPx(), 8.dp.toPx()),
+        floatArrayOf(AutologSpace.sm.toPx() + AutologSpace.xs.toPx(), AutologSpace.sm.toPx()),
         0f,
     )
     drawLine(
         color = center,
         start = Offset(size.width / 2f, topY),
         end = Offset(size.width / 2f, bottomY),
-        strokeWidth = 2.2.dp.toPx(),
+        strokeWidth = AutologSpace.xs.toPx() / 2f,
         cap = StrokeCap.Round,
         pathEffect = dash,
     )

@@ -14,11 +14,19 @@ import androidx.room.PrimaryKey
             childColumns = ["vehicleId"],
             onDelete = ForeignKey.CASCADE,
         ),
+        ForeignKey(
+            entity = ReminderEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["linkedReminderId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
     ],
     indices = [
         Index("vehicleId"),
         Index("dateEpochMs"),
         Index(value = ["vehicleId", "dateEpochMs"]),
+        Index("linkedReminderId"),
+        Index(value = ["vehicleId", "serviceType", "dateEpochMs"]),
     ],
 )
 data class ServiceEntity(

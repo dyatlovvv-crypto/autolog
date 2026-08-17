@@ -3,6 +3,7 @@ package ru.autolog.app.ui.dashboard
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,8 +12,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Build
@@ -23,10 +24,21 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,20 +61,22 @@ import ru.autolog.app.domain.FuelType
 import ru.autolog.app.domain.ServiceChecklistCodec
 import ru.autolog.app.domain.ServiceKind
 import ru.autolog.app.ui.AutologViewModelFactory
+import ru.autolog.app.ui.components.AccentIcon
+import ru.autolog.app.ui.components.AccentIconButton
 import ru.autolog.app.ui.components.ActivityKind
 import ru.autolog.app.ui.components.ExpandableTimelineItem
 import ru.autolog.app.ui.components.StatCard
-import ru.autolog.app.ui.components.TimelineRoadConnector
 import ru.autolog.app.ui.components.TimelineTags
 import ru.autolog.app.ui.components.expenseActivityKind
 import ru.autolog.app.ui.components.icon
 import ru.autolog.app.ui.components.tint
 import ru.autolog.app.ui.components.toActivityKind
 import ru.autolog.app.ui.fluid.rubberBandOverscroll
-import ru.autolog.app.ui.glass.GlassFab
 import ru.autolog.app.ui.glass.GlassScaffold
-import ru.autolog.app.ui.glass.GlassTopAppBar
 import ru.autolog.app.ui.history.HistoryFilter
+import ru.autolog.app.ui.theme.AutologElevation
+import ru.autolog.app.ui.theme.AutologRadii
+import ru.autolog.app.ui.theme.AutologSpace
 import ru.autolog.app.ui.util.Formatters
 
 object DashboardTags {
@@ -116,70 +130,62 @@ fun DashboardScreen(
             .testTag(DashboardTags.ROOT),
         floatingActionButtonPosition = FabPosition.Center,
         topBar = {
-            GlassTopAppBar(
+            TopAppBar(
                 title = {
-                    if (state.vehicles.isNotEmpty()) {
-                        VehicleSelectorBar(
-                            vehicles = state.vehicles,
-                            currentVehicleId = state.currentVehicleId,
-                            expanded = vehicleSelectorOpen,
-                            canAddVehicle = state.canAddVehicle,
-                            onExpandChange = { vehicleSelectorOpen = it },
-                            onSelectVehicle = viewModel::selectVehicle,
-                            onAddVehicle = onAddVehicle,
-                        )
-                    } else {
+                    if (state.vehicles.isEmpty()) {
                         Text(
                             text = "Autolog",
+                            style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.testTag(DashboardTags.TITLE),
                         )
                     }
                 },
                 actions = {
-                    IconButton(
+                    AccentIconButton(
                         onClick = onOpenAnalytics,
+                        imageVector = Icons.Default.Analytics,
+                        contentDescription = "Аналитика",
                         modifier = Modifier.testTag(DashboardTags.OPEN_ANALYTICS),
-                    ) {
-                        Icon(Icons.Default.Analytics, contentDescription = "Аналитика")
-                    }
-                    IconButton(
-                        onClick = onAddReminder,
-                        modifier = Modifier.testTag(DashboardTags.ADD_REMINDER),
-                    ) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Напоминание")
-                    }
-                    IconButton(
+                    )
+                    AccentIconButton(
                         onClick = onOpenSettings,
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Настройки",
                         modifier = Modifier.testTag(DashboardTags.OPEN_SETTINGS),
-                    ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Настройки")
-                    }
+                    )
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurface,
+                ),
             )
         },
         floatingActionButton = {
             if (state.vehicles.isNotEmpty()) {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
+                        .padding(horizontal = AutologSpace.md),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    GlassFab(
+                    OutlinedButton(
                         onClick = { serviceHubOpen = true },
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .testTag(DashboardTags.ADD_SERVICE),
+                        modifier = Modifier.testTag(DashboardTags.ADD_SERVICE),
+                        shape = RoundedCornerShape(AutologRadii.card),
                     ) {
-                        Icon(Icons.Default.Build, contentDescription = "Сервис")
+                        AccentIcon(
+                            imageVector = Icons.Default.Build,
+                            contentDescription = null,
+                        )
+                        Spacer(modifier = Modifier.width(AutologSpace.sm))
+                        Text("Сервис", style = MaterialTheme.typography.bodyMedium)
                     }
-                    GlassFab(
+                    RefuelFab(
                         onClick = onAddRefuel,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .testTag(DashboardTags.ADD_REFUEL),
-                    ) {
-                        Icon(Icons.Default.LocalGasStation, contentDescription = "Заправка")
-                    }
+                        modifier = Modifier.testTag(DashboardTags.ADD_REFUEL),
+                    )
                 }
             }
         },
@@ -190,145 +196,148 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(24.dp),
-                ) { Text("Загрузка…") }
+                        .padding(AutologSpace.lg),
+                ) { Text("Загрузка…", style = MaterialTheme.typography.bodyMedium) }
             }
             state.vehicles.isEmpty() -> {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(24.dp),
+                        .padding(AutologSpace.lg),
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Text("Добавьте первый автомобиль", style = MaterialTheme.typography.headlineSmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Нужны название, пробег и объём бака.")
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        "Добавьте первый автомобиль",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Spacer(modifier = Modifier.height(AutologSpace.sm))
+                    Text(
+                        "Нужны название, пробег и объём бака.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(modifier = Modifier.height(AutologSpace.md))
                     TextButton(onClick = onAddVehicle) { Text("Добавить автомобиль") }
                 }
             }
             else -> {
                 val dash = state.dashboard as? DashboardSnapshot.Data
                 val timeline = dash?.timeline.orEmpty()
-                Column(
+                val oilReminder = remember(dash?.activeReminders) {
+                    primaryOilReminder(dash?.activeReminders.orEmpty())
+                }
+                val grouped = remember(timeline) {
+                    timeline.mapIndexed { index, entry -> index to entry }
+                        .groupBy { monthKey(it.second.sortEpochMs) }
+                }
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(horizontal = 16.dp)
                         .rubberBandOverscroll()
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                        .testTag(DashboardTags.ACTIVITY_FEED),
+                    contentPadding = PaddingValues(
+                        start = AutologSpace.md,
+                        end = AutologSpace.md,
+                        top = AutologSpace.sm,
+                        bottom = AutologSpace.xl,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(AutologSpace.sm),
                 ) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Пробег: ${dash?.vehicle?.currentOdometerKm ?: "—"} км · бак ${
-                            dash?.vehicle?.tankCapacityLiters?.let {
+                    item(key = "hero") {
+                        VehicleSelectorBar(
+                            vehicles = state.vehicles,
+                            currentVehicleId = state.currentVehicleId,
+                            expanded = vehicleSelectorOpen,
+                            canAddVehicle = state.canAddVehicle,
+                            onExpandChange = { vehicleSelectorOpen = it },
+                            onSelectVehicle = viewModel::selectVehicle,
+                            onAddVehicle = onAddVehicle,
+                            odometerKm = dash?.vehicle?.currentOdometerKm,
+                            tankLabel = dash?.vehicle?.tankCapacityLiters?.let {
                                 Formatters.volumeLabel(it, settings.volumeUnit)
-                            } ?: "—"
-                        }",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    StatCard(
-                        title = "Последний расход (до полного)",
-                        value = Formatters.consumptionValue(
-                            dash?.lastConsumptionLPer100,
-                            settings.consumptionUnit,
-                        ),
-                        unit = if (dash?.lastConsumptionLPer100 == null) {
-                            Formatters.consumptionHint(null)
-                        } else {
-                            Formatters.consumptionUnitLabel(settings.consumptionUnit)
-                        },
-                        testTag = DashboardTags.LAST_CONSUMPTION,
-                    )
-                    val oilReminder = remember(dash?.activeReminders) {
-                        primaryOilReminder(dash?.activeReminders.orEmpty())
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        StatCard(
-                            title = "Средний расход",
-                            value = Formatters.consumptionValue(
-                                dash?.averageConsumptionLPer100,
-                                settings.consumptionUnit,
-                            ),
-                            unit = if (dash?.averageConsumptionLPer100 == null) {
-                                Formatters.consumptionHint(null)
-                            } else {
-                                Formatters.consumptionUnitLabel(settings.consumptionUnit)
                             },
-                            cardModifier = Modifier.weight(1f),
-                            testTag = DashboardTags.AVG_CONSUMPTION,
                         )
-                        StatCard(
-                            title = oilReminder?.title?.takeIf { it.isNotBlank() } ?: "Замена масла",
-                            value = oilReminder?.remainingKm?.toString() ?: "нет данных",
-                            unit = when {
-                                oilReminder == null -> "добавьте напоминание"
-                                oilReminder.remainingDays != null ->
-                                    "км · ${oilReminder.remainingDays} дн."
-                                else -> "км до замены"
-                            },
-                            cardModifier = Modifier.weight(1f),
-                            testTag = DashboardTags.OIL_REMINDER,
-                            onClick = {
-                                if (oilReminder != null) {
-                                    onOpenReminder(oilReminder.id)
+                    }
+                    item(key = "metrics") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(AutologSpace.sm),
+                        ) {
+                            ConsumptionPairCard(
+                                lastValue = Formatters.consumptionValue(
+                                    dash?.lastConsumptionLPer100,
+                                    settings.consumptionUnit,
+                                ),
+                                lastUnit = if (dash?.lastConsumptionLPer100 == null) {
+                                    Formatters.consumptionHint(null)
                                 } else {
-                                    onAddReminder()
-                                }
-                            },
+                                    Formatters.consumptionUnitLabel(settings.consumptionUnit)
+                                },
+                                avgValue = Formatters.consumptionValue(
+                                    dash?.averageConsumptionLPer100,
+                                    settings.consumptionUnit,
+                                ),
+                                avgUnit = if (dash?.averageConsumptionLPer100 == null) {
+                                    Formatters.consumptionHint(null)
+                                } else {
+                                    Formatters.consumptionUnitLabel(settings.consumptionUnit)
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatCard(
+                                title = oilReminder?.title?.takeIf { it.isNotBlank() } ?: "Замена масла",
+                                value = oilReminder?.remainingKm?.toString() ?: "нет данных",
+                                unit = when {
+                                    oilReminder == null -> "добавьте напоминание"
+                                    oilReminder.remainingDays != null ->
+                                        "км · ${oilReminder.remainingDays} дн."
+                                    else -> "км до замены"
+                                },
+                                cardModifier = Modifier.weight(1f),
+                                testTag = DashboardTags.OIL_REMINDER,
+                                onClick = {
+                                    if (oilReminder != null) {
+                                        onOpenReminder(oilReminder.id)
+                                    } else {
+                                        onAddReminder()
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    item(key = "feed_title") {
+                        Text(
+                            "Лента",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(top = AutologSpace.xs),
                         )
                     }
-
-                    Text("Лента", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Тап — раскрыть · смотреть / править / удалить",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag(DashboardTags.ACTIVITY_FEED),
-                    ) {
-                        if (timeline.isEmpty()) {
+                    if (timeline.isEmpty()) {
+                        item(key = "feed_empty") {
                             Text(
                                 "Пока пусто. Добавьте заправку, расход или сервис.",
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        } else {
-                            var lastMonthKey: String? = null
-                            timeline.forEachIndexed { index, entry ->
-                                val monthKey = monthKey(entry.sortEpochMs)
-                                if (monthKey != lastMonthKey) {
-                                    lastMonthKey = monthKey
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = if (index == 0) 4.dp else 0.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        // Keep the road continuous through month labels
-                                        TimelineRoadConnector(
-                                            modifier = Modifier
-                                                .width(40.dp)
-                                                .height(28.dp),
-                                        )
-                                        Text(
-                                            text = monthHeaderRu(entry.sortEpochMs),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp),
-                                        )
-                                    }
+                        }
+                    } else {
+                        grouped.forEach { (_, rows) ->
+                            val monthEpoch = rows.first().second.sortEpochMs
+                            item(key = "month-${monthKey(monthEpoch)}") {
+                                MonthLabel(text = monthHeaderRu(monthEpoch))
+                            }
+                            items(
+                                items = rows,
+                                key = { (_, entry) -> "${entry::class.simpleName}_${entry.id}" },
+                            ) { (index, entry) ->
+                                val presentation = remember(entry, index, timeline) {
+                                    val toKm = TimelineDistance.kmSincePreviousTo(timeline, index)
+                                    timelinePresentation(entry, toKm)
                                 }
-                                val presentation = remember(entry) { timelinePresentation(entry) }
                                 val key = "${presentation.kindKey}_${entry.id}"
+                                val roadKm = TimelineDistance.kmSincePreviousRefuel(timeline, index)
                                 ExpandableTimelineItem(
                                     kind = presentation.kind,
                                     kindKey = presentation.kindKey,
@@ -336,9 +345,14 @@ fun DashboardScreen(
                                     title = presentation.title,
                                     subtitle = presentation.subtitle,
                                     detailLines = presentation.details,
+                                    dateText = presentation.dateText,
+                                    kmText = presentation.kmText,
+                                    moneyText = presentation.moneyText,
                                     expanded = expandedKey == key,
                                     isFirst = index == 0,
                                     isLast = index == timeline.lastIndex,
+                                    roadKm = roadKm,
+                                    roadKmLabel = roadKm?.let { TimelineDistance.formatKm(it) },
                                     onToggle = {
                                         expandedKey = if (expandedKey == key) null else key
                                     },
@@ -371,7 +385,6 @@ fun DashboardScreen(
                             }
                         }
                     }
-                    Spacer(modifier = Modifier.height(72.dp))
                 }
             }
         }
@@ -380,10 +393,26 @@ fun DashboardScreen(
     if (serviceHubOpen) {
         AlertDialog(
             onDismissRequest = { serviceHubOpen = false },
-            title = { Text("Сервис") },
+            title = { Text("Сервис", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Добавить", style = MaterialTheme.typography.titleSmall)
+                Column(verticalArrangement = Arrangement.spacedBy(AutologSpace.sm)) {
+                    Text("Добавить", style = MaterialTheme.typography.bodyMedium)
+                    TextButton(
+                        onClick = {
+                            serviceHubOpen = false
+                            onAddReminder()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(DashboardTags.ADD_REMINDER),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                        )
+                        Spacer(modifier = Modifier.size(AutologSpace.sm))
+                        Text("Напоминание", style = MaterialTheme.typography.bodyMedium)
+                    }
                     ServiceKind.entries.forEach { kind ->
                         val activity = kind.toActivityKind()
                         TextButton(
@@ -400,8 +429,8 @@ fun DashboardScreen(
                                 contentDescription = null,
                                 tint = activity.tint(),
                             )
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text(kind.label)
+                            Spacer(modifier = Modifier.size(AutologSpace.sm))
+                            Text(kind.label, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                     TextButton(
@@ -418,12 +447,11 @@ fun DashboardScreen(
                             contentDescription = null,
                             tint = ActivityKind.WASH.tint(),
                         )
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Text("Мойка")
+                        Spacer(modifier = Modifier.size(AutologSpace.sm))
+                        Text("Мойка", style = MaterialTheme.typography.bodyMedium)
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("История", style = MaterialTheme.typography.titleSmall)
+                    Text("История", style = MaterialTheme.typography.bodyMedium)
                     listOf(
                         HistoryFilter.TO to ActivityKind.TO,
                         HistoryFilter.REPAIR to ActivityKind.REPAIR,
@@ -444,8 +472,8 @@ fun DashboardScreen(
                                 contentDescription = null,
                                 tint = activity.tint(),
                             )
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text("История · ${filter.label}")
+                            Spacer(modifier = Modifier.size(AutologSpace.sm))
+                            Text("История · ${filter.label}", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
@@ -454,6 +482,150 @@ fun DashboardScreen(
                 TextButton(onClick = { serviceHubOpen = false }) { Text("Отмена") }
             },
         )
+    }
+}
+
+@Composable
+private fun RefuelFab(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(AutologRadii.card)
+    val start = MaterialTheme.colorScheme.primary
+    val end = MaterialTheme.colorScheme.tertiary
+    Row(
+        modifier = modifier
+            .shadow(
+                elevation = AutologSpace.md,
+                shape = shape,
+                ambientColor = start.copy(alpha = 0.35f),
+                spotColor = start.copy(alpha = 0.45f),
+            )
+            .clip(shape)
+            .background(brush = Brush.linearGradient(listOf(start, end)))
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = AutologSpace.lg, vertical = AutologSpace.md),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AutologSpace.sm),
+    ) {
+        Icon(
+            imageVector = Icons.Default.LocalGasStation,
+            contentDescription = "Заправка",
+            tint = MaterialTheme.colorScheme.onPrimary,
+        )
+        Text(
+            text = "Заправка",
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+@Composable
+private fun ConsumptionPairCard(
+    lastValue: String,
+    lastUnit: String,
+    avgValue: String,
+    avgUnit: String,
+    modifier: Modifier = Modifier,
+) {
+    val lastEmpty = lastValue.equals("нет данных", ignoreCase = true)
+    val avgEmpty = avgValue.equals("нет данных", ignoreCase = true)
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(AutologRadii.card),
+        tonalElevation = AutologElevation.card,
+        shadowElevation = 0.dp,
+    ) {
+        Column(modifier = Modifier.padding(AutologSpace.md)) {
+            Text(
+                text = "Расход",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Последний",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = AutologSpace.sm),
+            )
+            Text(
+                text = lastValue,
+                style = if (lastEmpty) {
+                    MaterialTheme.typography.labelSmall
+                } else {
+                    MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                },
+                color = if (lastEmpty) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier
+                    .padding(top = AutologSpace.xs)
+                    .testTag(DashboardTags.LAST_CONSUMPTION),
+            )
+            Text(
+                text = lastUnit,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Средний",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = AutologSpace.sm),
+            )
+            Text(
+                text = avgValue,
+                style = if (avgEmpty) {
+                    MaterialTheme.typography.labelSmall
+                } else {
+                    MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                },
+                color = if (avgEmpty) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier
+                    .padding(top = AutologSpace.xs)
+                    .testTag(DashboardTags.AVG_CONSUMPTION),
+            )
+            Text(
+                text = avgUnit,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonthLabel(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = AutologSpace.xs),
+    ) {
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = RoundedCornerShape(AutologRadii.card),
+            tonalElevation = AutologElevation.card,
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(
+                    horizontal = AutologSpace.sm,
+                    vertical = AutologSpace.xs,
+                ),
+            )
+        }
     }
 }
 
@@ -471,9 +643,15 @@ private data class TimelinePresentation(
     val title: String,
     val subtitle: String,
     val details: List<String>,
+    val dateText: String? = null,
+    val kmText: String? = null,
+    val moneyText: String? = null,
 )
 
-private fun timelinePresentation(entry: TimelineEntry): TimelinePresentation = when (entry) {
+private fun timelinePresentation(
+    entry: TimelineEntry,
+    kmSincePreviousTo: Int? = null,
+): TimelinePresentation = when (entry) {
     is TimelineEntry.Refuel -> {
         val r = entry.entity
         val fuelLabel = FuelType.fromStorage(r.fuelType)?.label
@@ -487,6 +665,12 @@ private fun timelinePresentation(entry: TimelineEntry): TimelinePresentation = w
                 append(" · ${r.odometerKm} км")
                 append(" · ${Formatters.money(r.totalCost)}")
             },
+            dateText = buildString {
+                append(Formatters.date(r.dateEpochMs))
+                r.stationName?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+            },
+            kmText = "${r.odometerKm} км",
+            moneyText = Formatters.money(r.totalCost),
             details = buildList {
                 add(
                     buildString {
@@ -513,6 +697,9 @@ private fun timelinePresentation(entry: TimelineEntry): TimelinePresentation = w
                 append(" · ${Formatters.money(e.totalCost)}")
                 e.odometerKm?.let { append(" · $it км") }
             },
+            dateText = Formatters.date(e.dateEpochMs),
+            kmText = e.odometerKm?.let { "$it км" },
+            moneyText = Formatters.money(e.totalCost),
             details = listOfNotNull(
                 e.description?.takeIf { it.isNotBlank() },
             ),
@@ -530,12 +717,21 @@ private fun timelinePresentation(entry: TimelineEntry): TimelinePresentation = w
                 append(" · ${s.odometerKm} км")
                 append(" · ${Formatters.money(s.totalCost)}")
             },
-            details = listOfNotNull(
-                s.description?.takeIf { it.isNotBlank() },
-            ) + ServiceChecklistCodec.decode(s.checklistJson).map { item ->
-                buildString {
-                    append(if (item.done) "✓ " else "○ ")
-                    append(item.text)
+            dateText = Formatters.date(s.dateEpochMs),
+            kmText = "${s.odometerKm} км",
+            moneyText = Formatters.money(s.totalCost),
+            details = buildList {
+                kmSincePreviousTo?.let {
+                    add("С прошлого ТО · ${TimelineDistance.formatKm(it)} км")
+                }
+                s.description?.takeIf { it.isNotBlank() }?.let { add(it) }
+                ServiceChecklistCodec.decode(s.checklistJson).forEach { item ->
+                    add(
+                        buildString {
+                            append(if (item.done) "✓ " else "○ ")
+                            append(item.text)
+                        },
+                    )
                 }
             },
         )
@@ -549,6 +745,9 @@ private fun timelinePresentation(entry: TimelineEntry): TimelinePresentation = w
             kindKey = "REMINDER",
             title = reminder.title,
             subtitle = "$kmPart или $daysPart · ${Formatters.date(reminder.nextDueDateEpochMs)}",
+            dateText = Formatters.date(reminder.nextDueDateEpochMs),
+            kmText = kmPart,
+            moneyText = daysPart,
             details = buildList {
                 reminder.intervalKm?.let { add("Интервал: $it км") }
                 reminder.intervalDays?.let { add("Интервал: $it дн.") }
@@ -566,10 +765,10 @@ private fun monthKey(epochMs: Long): String {
 private fun monthHeaderRu(epochMs: Long): String {
     val cal = Calendar.getInstance().apply { timeInMillis = epochMs }
     val months = arrayOf(
-        "ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА", "АПРЕЛЯ", "МАЯ", "ИЮНЯ",
-        "ИЮЛЯ", "АВГУСТА", "СЕНТЯБРЯ", "ОКТЯБРЯ", "НОЯБРЯ", "ДЕКАБРЯ",
+        "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
     )
     val month = months[cal.get(Calendar.MONTH)]
     val year = cal.get(Calendar.YEAR)
-    return "$month $year".uppercase(Locale("ru"))
+    return "$month $year"
 }

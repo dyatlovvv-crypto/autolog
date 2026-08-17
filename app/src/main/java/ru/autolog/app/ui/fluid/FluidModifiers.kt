@@ -14,22 +14,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Velocity
-import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /**
  * Gooey / liquid appearance: blur + alpha contrast ColorMatrix (API 31+).
@@ -94,48 +84,8 @@ fun Modifier.bouncePressable(
         }
 }
 
-/**
- * Rubber-band overscroll: list stretches with translation, then springs back.
- */
-fun Modifier.rubberBandOverscroll(): Modifier = composed {
-    val scope = rememberCoroutineScope()
-    val offsetY = remember { Animatable(0f) }
-    val maxPull = with(LocalDensity.current) { 96.dp.toPx() }
-
-    val connection = remember(maxPull) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (available.y == 0f) return Offset.Zero
-                val next = (offsetY.value + available.y * 0.45f).coerceIn(-maxPull, maxPull)
-                scope.launch { offsetY.snapTo(next) }
-                return Offset(0f, available.y)
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                offsetY.animateTo(
-                    0f,
-                    spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow,
-                    ),
-                )
-                return available
-            }
-        }
-    }
-
-    this
-        .nestedScroll(connection)
-        .graphicsLayer {
-            translationY = offsetY.value
-            val stretch = 1f + (abs(offsetY.value) / maxPull) * 0.03f
-            scaleY = stretch
-        }
-}
+/** Platform overscroll. */
+fun Modifier.rubberBandOverscroll(): Modifier = this
 
 /** Animate gooey progress when [visible] becomes true. */
 fun Modifier.liquidAppear(visible: Boolean): Modifier = composed {

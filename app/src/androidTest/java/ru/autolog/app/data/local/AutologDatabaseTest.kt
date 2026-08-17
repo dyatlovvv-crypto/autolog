@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import ru.autolog.app.data.local.entity.RefuellingEntity
 import ru.autolog.app.data.local.entity.ReminderEntity
+import ru.autolog.app.data.local.entity.ServiceEntity
 import ru.autolog.app.data.local.entity.VehicleEntity
 import ru.autolog.app.domain.VehicleLimits
 
@@ -119,5 +120,48 @@ class AutologDatabaseTest {
         }
         assertThat(db.vehicleDao().count()).isEqualTo(VehicleLimits.MAX)
         assertThat(VehicleLimits.canAdd(db.vehicleDao().count())).isFalse()
+    }
+
+    @Test
+    fun deleteReminder_setsLinkedServiceIdNull_keepsServiceRow() = runTest {
+        val now = 1_700_000_000_000L
+        val vehicleId = db.vehicleDao().insert(
+            VehicleEntity(
+                name = "Polo",
+                currentOdometerKm = 10_000,
+                tankCapacityLiters = 45.0,
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now,
+            ),
+        )
+        val reminderId = db.reminderDao().insert(
+            ReminderEntity(
+                vehicleId = vehicleId,
+                title = "Масло",
+                intervalKm = 7_500,
+                baselineOdometerKm = 10_000,
+                baselineDateEpochMs = now,
+                createdAtEpochMs = now,
+                updatedAtEpochMs = now,
+            ),
+        )
+        val serviceId = db.serviceDao().insert(
+            ServiceEntity(
+                vehicleId = vehicleId,
+                dateEpochMs = now,
+                odometerKm = 10_000,
+                totalCost = 1_000.0,
+                serviceType = "TO",
+                checklistJson = """[{"id":"a","text":"масло","done":true}]""",
+                linkedReminderId = reminderId,
+                createdAtEpochMs = now,
+            ),
+        )
+
+        db.reminderDao().delete(db.reminderDao().getById(reminderId)!!)
+
+        val service = db.serviceDao().getById(serviceId)!!
+        assertThat(service.linkedReminderId).isNull()
+        assertThat(service.checklistJson).contains("масло")
     }
 }

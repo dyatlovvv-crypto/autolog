@@ -1,11 +1,5 @@
 package ru.autolog.app.ui.glass
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,7 +9,6 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -36,8 +29,6 @@ import androidx.compose.ui.unit.dp
 import ru.autolog.app.data.settings.AppBackground
 import ru.autolog.app.ui.theme.AutologColors
 import ru.autolog.app.ui.theme.LocalGlassTokens
-import kotlin.math.cos
-import kotlin.math.sin
 
 val GlassShapeLarge = RoundedCornerShape(28.dp)
 val GlassShapeMedium = RoundedCornerShape(22.dp)
@@ -104,7 +95,7 @@ fun GlassPanel(
     )
 }
 
-/** Animated mesh blobs under every glass window. */
+/** Static mesh blobs under every glass window. Animated mesh invalidated every vsync. */
 @Composable
 fun LiquidMeshBackground(
     modifier: Modifier = Modifier,
@@ -114,16 +105,6 @@ fun LiquidMeshBackground(
 ) {
     val dark = isSystemInDarkTheme()
     val context = LocalContext.current
-    val transition = rememberInfiniteTransition(label = "liquidMesh")
-    val t by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (Math.PI * 2).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 16_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "meshPhase",
-    )
     val customBitmap = remember(customUri, mode) {
         if (mode == AppBackground.CUSTOM && !customUri.isNullOrBlank()) {
             runCatching {
@@ -188,34 +169,10 @@ fun LiquidMeshBackground(
                             }
 
                             val a = if (dark) 0.28f else 0.32f
-                            blob(
-                                w * (0.2f + 0.08f * cos(t.toDouble()).toFloat()),
-                                h * (0.16f + 0.06f * sin(t.toDouble()).toFloat()),
-                                w * 0.58f,
-                                AutologColors.BlobBlue,
-                                a,
-                            )
-                            blob(
-                                w * (0.84f + 0.06f * sin(t.toDouble()).toFloat()),
-                                h * (0.26f + 0.08f * cos(t.toDouble()).toFloat()),
-                                w * 0.52f,
-                                AutologColors.BlobViolet,
-                                a,
-                            )
-                            blob(
-                                w * (0.32f + 0.1f * sin((t + 1.2f).toDouble()).toFloat()),
-                                h * (0.8f + 0.05f * cos((t + 1.2f).toDouble()).toFloat()),
-                                w * 0.62f,
-                                AutologColors.BlobCyan,
-                                a,
-                            )
-                            blob(
-                                w * (0.72f + 0.05f * cos((t + 2.1f).toDouble()).toFloat()),
-                                h * (0.7f + 0.07f * sin((t + 2.1f).toDouble()).toFloat()),
-                                w * 0.44f,
-                                AutologColors.BlobAmber,
-                                a * 0.85f,
-                            )
+                            blob(w * 0.28f, h * 0.16f, w * 0.58f, AutologColors.BlobBlue, a)
+                            blob(w * 0.84f, h * 0.26f, w * 0.52f, AutologColors.BlobViolet, a)
+                            blob(w * 0.32f, h * 0.80f, w * 0.62f, AutologColors.BlobCyan, a)
+                            blob(w * 0.72f, h * 0.70f, w * 0.44f, AutologColors.BlobAmber, a * 0.85f)
                         },
                 )
             }

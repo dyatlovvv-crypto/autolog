@@ -19,6 +19,7 @@ import androidx.room.PrimaryKey
         Index("vehicleId"),
         Index("nextDueDateEpochMs"),
         Index(value = ["vehicleId", "isActive"]),
+        Index(value = ["isActive", "showPhoneNotifications", "nextDueDateEpochMs"]),
     ],
 )
 data class ReminderEntity(

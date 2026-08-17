@@ -1,16 +1,15 @@
 package ru.autolog.app.ui.dashboard
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -23,21 +22,23 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import ru.autolog.app.data.local.entity.VehicleEntity
+import ru.autolog.app.ui.components.AccentIcon
 import ru.autolog.app.ui.fluid.bouncePressable
 import ru.autolog.app.ui.fluid.liquidAppear
 import ru.autolog.app.ui.fluid.rubberBandOverscroll
-import ru.autolog.app.ui.glass.GlassShapePill
-import ru.autolog.app.ui.glass.liquidGlassPanel
-import ru.autolog.app.ui.theme.LocalGlassTokens
+import ru.autolog.app.ui.theme.AutologElevation
+import ru.autolog.app.ui.theme.AutologRadii
+import ru.autolog.app.ui.theme.AutologSpace
 
 object VehicleSelectorTags {
     const val TRIGGER = "vehicle_selector_trigger"
@@ -57,58 +58,104 @@ fun VehicleSelectorBar(
     onSelectVehicle: (Long) -> Unit,
     onAddVehicle: () -> Unit,
     modifier: Modifier = Modifier,
+    odometerLine: String? = null,
+    odometerKm: Int? = null,
+    tankLabel: String? = null,
 ) {
     val current = vehicles.firstOrNull { it.id == currentVehicleId } ?: vehicles.firstOrNull()
-    val tokens = LocalGlassTokens.current
 
-    Column(modifier = modifier) {
-        Text(
-            text = "Autolog",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.testTag(DashboardTags.TITLE),
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Box(
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(AutologRadii.card),
+        tonalElevation = AutologElevation.card,
+        shadowElevation = 0.dp,
+    ) {
+        Row(
             modifier = Modifier
                 .testTag(VehicleSelectorTags.TRIGGER)
-                .liquidGlassPanel(shape = GlassShapePill, elevation = 4.dp)
                 .bouncePressable(enabled = vehicles.isNotEmpty()) {
                     onExpandChange(true)
-                },
+                }
+                .padding(AutologSpace.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(AutologSpace.sm),
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DirectionsCar,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
+            AccentIcon(
+                imageVector = Icons.Default.DirectionsCar,
+                contentDescription = null,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Autolog",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Column(modifier = Modifier.weight(1f, fill = false)) {
-                    Text(
-                        text = current?.name ?: "Нет автомобиля",
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                    )
-                    val plate = current?.plate
-                    if (!plate.isNullOrBlank()) {
+                Text(
+                    text = current?.name ?: "Нет автомобиля",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .padding(top = AutologSpace.xs)
+                        .testTag(DashboardTags.TITLE),
+                )
+                val plate = current?.plate
+                if (odometerKm != null) {
+                    Row(
+                        modifier = Modifier.padding(top = AutologSpace.xs),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(AutologSpace.xs),
+                    ) {
                         Text(
-                            text = plate,
+                            text = odometerKm.toString(),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "км",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = AutologSpace.xs),
                         )
+                        tankLabel?.let {
+                            Text(
+                                text = "бак $it",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = AutologSpace.xs),
+                            )
+                        }
+                        plate?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = AutologSpace.xs),
+                            )
+                        }
                     }
+                } else if (!odometerLine.isNullOrBlank() || !plate.isNullOrBlank()) {
+                    Text(
+                        text = buildString {
+                            if (!odometerLine.isNullOrBlank()) append(odometerLine)
+                            if (!plate.isNullOrBlank()) {
+                                if (isNotEmpty()) append(" · ")
+                                append(plate)
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = AutologSpace.xs),
+                    )
                 }
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Выбрать автомобиль",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = "Выбрать автомобиль",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 
@@ -116,25 +163,30 @@ fun VehicleSelectorBar(
         ModalBottomSheet(
             onDismissRequest = { onExpandChange(false) },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = tokens.fill,
-            scrimColor = tokens.scrim.copy(alpha = 0.45f),
+            containerColor = MaterialTheme.colorScheme.surface,
         ) {
             Column(
                 modifier = Modifier
                     .testTag(VehicleSelectorTags.SHEET)
                     .liquidAppear(visible = true)
-                    .padding(bottom = 8.dp),
+                    .padding(bottom = AutologSpace.sm),
             ) {
                 Text(
                     text = "Автомобили",
                     style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = AutologSpace.lg, vertical = AutologSpace.sm),
                 )
                 LazyColumn(modifier = Modifier.rubberBandOverscroll()) {
                     items(vehicles, key = { it.id }) { vehicle ->
                         val selected = vehicle.id == currentVehicleId
                         ListItem(
-                            headlineContent = { Text(vehicle.name) },
+                            headlineContent = {
+                                Text(
+                                    vehicle.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            },
                             supportingContent = {
                                 val plate = vehicle.plate?.takeIf { it.isNotBlank() }
                                 Text(
@@ -145,6 +197,7 @@ fun VehicleSelectorBar(
                                             append(plate)
                                         }
                                     },
+                                    style = MaterialTheme.typography.labelSmall,
                                 )
                             },
                             leadingContent = {
@@ -167,11 +220,12 @@ fun VehicleSelectorBar(
                                     )
                                 }
                             },
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 2.dp)
-                                .liquidGlassPanel(elevation = 3.dp)
+                                .padding(horizontal = AutologSpace.md, vertical = AutologSpace.xs)
                                 .testTag(VehicleSelectorTags.item(vehicle.id))
                                 .bouncePressable {
                                     onSelectVehicle(vehicle.id)
@@ -180,12 +234,13 @@ fun VehicleSelectorBar(
                         )
                     }
                     item {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        HorizontalDivider(modifier = Modifier.padding(vertical = AutologSpace.sm))
                         if (canAddVehicle) {
                             ListItem(
                                 headlineContent = {
                                     Text(
                                         "+ Добавить автомобиль",
+                                        style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                                 },
@@ -196,11 +251,12 @@ fun VehicleSelectorBar(
                                         tint = MaterialTheme.colorScheme.primary,
                                     )
                                 },
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                colors = ListItemDefaults.colors(
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp)
-                                    .liquidGlassPanel(elevation = 3.dp)
+                                    .padding(horizontal = AutologSpace.md)
                                     .testTag(VehicleSelectorTags.ADD_VEHICLE)
                                     .bouncePressable {
                                         onExpandChange(false)
@@ -208,7 +264,7 @@ fun VehicleSelectorBar(
                                     },
                             )
                         }
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(AutologSpace.xl))
                     }
                 }
             }

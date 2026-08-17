@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import ru.autolog.app.data.local.dao.ExpenseDao
 import ru.autolog.app.data.local.dao.RefuellingDao
 import ru.autolog.app.data.local.dao.ReminderDao
@@ -25,8 +23,8 @@ import ru.autolog.app.data.local.entity.VehicleEntity
         ServiceEntity::class,
         ReminderEntity::class,
     ],
-    version = 2,
-    exportSchema = false,
+    version = 3,
+    exportSchema = true,
 )
 abstract class AutologDatabase : RoomDatabase() {
     abstract fun vehicleDao(): VehicleDao
@@ -38,13 +36,6 @@ abstract class AutologDatabase : RoomDatabase() {
     companion object {
         const val NAME = "autolog.db"
 
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE services ADD COLUMN checklistJson TEXT")
-                db.execSQL("ALTER TABLE services ADD COLUMN photoPathsJson TEXT")
-            }
-        }
-
         @Volatile
         private var instance: AutologDatabase? = null
 
@@ -55,8 +46,11 @@ abstract class AutologDatabase : RoomDatabase() {
                     AutologDatabase::class.java,
                     NAME,
                 )
-                    .addMigrations(MIGRATION_1_2)
-                    // Never wipe user data on schema mismatch — add an explicit Migration instead.
+                    .addMigrations(
+                        AutologMigrations.MIGRATION_1_2,
+                        AutologMigrations.MIGRATION_2_3,
+                    )
+                    // Never wipe user data on schema mismatch. Add an explicit Migration instead.
                     .build()
                     .also { instance = it }
             }

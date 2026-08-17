@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 35
 
-        val appVersionName = "0.5.1"
-        versionCode = 42
+        val appVersionName = "0.5.5"
+        versionCode = 46
         versionName = appVersionName
         resValue("string", "app_name", "Autolog $appVersionName")
         resValue("string", "app_version", appVersionName)
@@ -69,6 +69,14 @@ android {
     testOptions {
         animationsDisabled = false
     }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
+}
+
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 tasks.register("verifyAndInstall") {

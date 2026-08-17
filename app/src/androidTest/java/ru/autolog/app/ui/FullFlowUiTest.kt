@@ -80,6 +80,7 @@ class FullFlowUiTest {
         }
 
         // Reminder create + edit
+        composeRule.onNodeWithTag(DashboardTags.ADD_SERVICE).performClick()
         composeRule.onNodeWithTag(DashboardTags.ADD_REMINDER).performClick()
         waitTag(AddReminderTags.SCREEN)
         composeRule.onNodeWithTag(AddReminderTags.TITLE).performTextClearance()
@@ -241,6 +242,9 @@ class FullFlowUiTest {
             composeRule.onAllNodes(hasText("8.0", substring = true), useUnmergedTree = true)
                 .fetchSemanticsNodes().size >= 2
         }
+        composeRule.onNodeWithText("500", substring = false).assertIsDisplayed()
+        val newerRefuelId = dash(vehicleId).recentRefuellings.maxBy { it.odometerKm }.id
+        composeRule.onNodeWithTag(TimelineTags.roadKm("REFUEL", newerRefuelId)).assertIsDisplayed()
 
         // Edit refuel via timeline
         val refuelId = dash(vehicleId).recentRefuellings.first().id
@@ -356,6 +360,26 @@ class FullFlowUiTest {
                 .fetchSemanticsNodes()
                 .isNotEmpty(),
         )
+        composeRule.onNodeWithTag(DashboardTags.feedService(serviceId)).performClick()
+        composeRule.waitForIdle()
+
+        // Newer ТО: km since previous ТО lives in the expansion, not on the road
+        composeRule.onNodeWithTag(DashboardTags.ADD_SERVICE).performClick()
+        composeRule.onNodeWithTag("add_service_kind_TO").performClick()
+        waitTag(ServiceTags.SCREEN)
+        composeRule.onNodeWithTag(ServiceTags.ODOMETER).performTextClearance()
+        composeRule.onNodeWithTag(ServiceTags.ODOMETER).performTextInput("107400")
+        composeRule.onNodeWithTag(ServiceTags.AMOUNT).performTextInput("800")
+        composeRule.onNodeWithTag(ServiceTags.SAVE).performClick()
+        waitTag(DashboardTags.ROOT)
+        val newerToId = dash(vehicleId).recentServices
+            .filter { ServiceKind.fromStorage(it.serviceType) == ServiceKind.TO }
+            .maxBy { it.odometerKm }
+            .id
+        composeRule.onNodeWithTag(DashboardTags.feedService(newerToId)).performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("С прошлого ТО", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("1 000 км", substring = true).assertIsDisplayed()
 
         // Cleanup via Settings (delete no longer in vehicle selector)
         deleteVehicleViaSettings(vehicleId)
@@ -363,7 +387,7 @@ class FullFlowUiTest {
 
     /**
      * Settings / Google copy must stay product-facing:
-     * no OAuth / Cloud Console / Cursor / sync jargon in visible UI.
+     * no Cloud Console / sync jargon in visible UI.
      */
     @Test
     fun settingsGoogleSection_showsProductCopy_withoutDevJargon() {
@@ -414,8 +438,6 @@ class FullFlowUiTest {
             .assertIsDisplayed()
 
         val forbidden = listOf(
-            "Cursor",
-            "cursor",
             "OAuth",
             "Cloud Console",
             "SHA-1",

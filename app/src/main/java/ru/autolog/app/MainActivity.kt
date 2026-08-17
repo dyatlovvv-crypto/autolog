@@ -39,6 +39,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        preferHighestRefreshRate()
         ReminderNotifications.ensureChannel(this)
         if (!isUnderEspressoTest()) {
             requestRuntimePermissions()
@@ -47,6 +48,35 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             AutologAppRoot()
+        }
+        window.decorView.post { preferHighestRefreshRate() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        preferHighestRefreshRate()
+    }
+
+    /**
+     * Pin the window to the display's fastest mode (120 Hz on capable phones).
+     * ColorOS otherwise often stays at 60 Hz for Compose windows.
+     */
+    private fun preferHighestRefreshRate() {
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay
+        } ?: return
+        val best = display.supportedModes.maxByOrNull { it.refreshRate } ?: return
+        val lp = window.attributes
+        lp.preferredDisplayModeId = best.modeId
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            lp.preferredRefreshRate = best.refreshRate
+        }
+        window.attributes = lp
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            window.decorView.setRequestedFrameRate(best.refreshRate)
         }
     }
 
