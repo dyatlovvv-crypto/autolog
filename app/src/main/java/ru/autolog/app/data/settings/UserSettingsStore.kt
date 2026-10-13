@@ -46,6 +46,12 @@ enum class SyncPeriod(val label: String) {
     WEEKLY("Раз в неделю"),
 }
 
+enum class DocsViewMode(val label: String) {
+    LIST("Список"),
+    GRID("Иконки"),
+    CARDS("Карточки"),
+}
+
 data class UserSettings(
     val palette: AppPalette = AppPalette.SYSTEM,
     val background: AppBackground = AppBackground.MESH,
@@ -58,6 +64,7 @@ data class UserSettings(
     val googlePhotoUrl: String? = null,
     val syncPeriod: SyncPeriod = SyncPeriod.OFF,
     val lastCloudSyncEpochMs: Long? = null,
+    val docsViewMode: DocsViewMode = DocsViewMode.LIST,
 )
 
 class UserSettingsStore(context: Context) {
@@ -84,6 +91,9 @@ class UserSettingsStore(context: Context) {
                 runCatching { SyncPeriod.valueOf(it) }.getOrNull()
             } ?: SyncPeriod.OFF,
             lastCloudSyncEpochMs = prefs[KEY_LAST_SYNC],
+            docsViewMode = prefs[KEY_DOCS_VIEW]?.let {
+                runCatching { DocsViewMode.valueOf(it) }.getOrNull()
+            } ?: DocsViewMode.LIST,
         )
     }
 
@@ -142,6 +152,10 @@ class UserSettingsStore(context: Context) {
         }
     }
 
+    suspend fun setDocsViewMode(value: DocsViewMode) {
+        dataStore.edit { it[KEY_DOCS_VIEW] = value.name }
+    }
+
     private companion object {
         val KEY_PALETTE = stringPreferencesKey("palette")
         val KEY_BACKGROUND = stringPreferencesKey("background")
@@ -153,5 +167,6 @@ class UserSettingsStore(context: Context) {
         val KEY_GOOGLE_PHOTO = stringPreferencesKey("google_photo_url")
         val KEY_SYNC_PERIOD = stringPreferencesKey("sync_period")
         val KEY_LAST_SYNC = longPreferencesKey("last_cloud_sync_epoch_ms")
+        val KEY_DOCS_VIEW = stringPreferencesKey("docs_view_mode")
     }
 }

@@ -12,6 +12,9 @@ object Routes {
     const val ADD_EXPENSE = "add_expense"
     const val ADD_EXPENSE_WASH = "add_expense_wash"
     const val ADD_SERVICE = "add_service/{kind}"
+    const val NOTEPAD = "notepad"
+    const val VEHICLE_DOCS = "vehicle_docs"
+    const val DOCUMENT_VIEWER = "document/{id}"
     const val GAS_MAP = "gas_map"
     const val REFUEL_DETAIL = "refuel/{id}"
     const val REMINDER_DETAIL = "reminder/{id}"
@@ -26,4 +29,5 @@ object Routes {
     fun expenseDetail(id: Long) = "expense/$id"
     fun serviceDetail(id: Long) = "service/$id"
     fun serviceEdit(id: Long) = "service_edit/$id"
+    fun documentViewer(id: Long) = "document/$id"
 }

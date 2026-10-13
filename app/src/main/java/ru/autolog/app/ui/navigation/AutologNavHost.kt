@@ -32,6 +32,9 @@ import ru.autolog.app.ui.fluid.FluidNavTransitions
 import ru.autolog.app.ui.history.HistoryFilter
 import ru.autolog.app.ui.history.HistoryScreen
 import ru.autolog.app.ui.map.GasStationMapScreen
+import ru.autolog.app.ui.docs.DocumentViewerScreen
+import ru.autolog.app.ui.docs.VehicleDocsScreen
+import ru.autolog.app.ui.note.NotepadScreen
 import ru.autolog.app.ui.refuel.AddRefuelScreen
 import ru.autolog.app.ui.reminder.AddReminderScreen
 import ru.autolog.app.ui.service.ServiceScreen
@@ -119,6 +122,8 @@ fun AutologNavHost() {
                 onAddReminder = { navController.navigate(Routes.ADD_REMINDER) },
                 onAddService = { kind -> navController.navigate(Routes.addService(kind.name)) },
                 onAddWash = { navController.navigate(Routes.ADD_EXPENSE_WASH) },
+                onOpenNotepad = { navController.navigate(Routes.NOTEPAD) },
+                onOpenDocs = { navController.navigate(Routes.VEHICLE_DOCS) },
                 onOpenServiceHistory = { filter ->
                     navController.navigate(Routes.history(filter.name))
                 },
@@ -215,6 +220,27 @@ fun AutologNavHost() {
             ExpenseScreen(
                 fixedCategory = "Мойка",
                 onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.NOTEPAD) {
+            NotepadScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.VEHICLE_DOCS) {
+            VehicleDocsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenDocument = { id -> navController.navigate(Routes.documentViewer(id)) },
+            )
+        }
+        composable(
+            Routes.DOCUMENT_VIEWER,
+            arguments = listOf(navArgument("id") { type = NavType.LongType }),
+        ) { entry ->
+            val id = entry.arguments?.getLong("id") ?: return@composable
+            DocumentViewerScreen(
+                documentId = id,
                 onBack = { navController.popBackStack() },
             )
         }

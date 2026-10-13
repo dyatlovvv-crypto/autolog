@@ -3,6 +3,8 @@ package ru.autolog.app.ui
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -170,6 +172,7 @@ class FullFlowUiTest {
 
         // History via wrench hub: ТО + open read-only view
         composeRule.onNodeWithTag(DashboardTags.ADD_SERVICE).performClick()
+        composeRule.onNodeWithTag(DashboardTags.SERVICE_HUB_HISTORY_SECTION).performClick()
         composeRule.onNodeWithTag(DashboardTags.serviceHubHistory("TO")).performClick()
         waitTag(HistoryTags.ROOT)
         composeRule.onNodeWithTag(HistoryTags.FILTER_TO).assertIsDisplayed()
@@ -242,9 +245,18 @@ class FullFlowUiTest {
             composeRule.onAllNodes(hasText("8.0", substring = true), useUnmergedTree = true)
                 .fetchSemanticsNodes().size >= 2
         }
-        composeRule.onNodeWithText("500", substring = false).assertIsDisplayed()
         val newerRefuelId = dash(vehicleId).recentRefuellings.maxBy { it.odometerKm }.id
         composeRule.onNodeWithTag(TimelineTags.roadKm("REFUEL", newerRefuelId)).assertIsDisplayed()
+        composeRule.onNode(
+            hasTestTag(TimelineTags.roadKm("REFUEL", newerRefuelId))
+                .and(hasAnyDescendant(hasText("500 км", substring = false))),
+            useUnmergedTree = true,
+        ).assertExists()
+        composeRule.onNode(
+            hasTestTag(TimelineTags.roadKm("REFUEL", newerRefuelId))
+                .and(hasAnyDescendant(hasText("8.0 л/100", substring = false))),
+            useUnmergedTree = true,
+        ).assertExists()
 
         // Edit refuel via timeline
         val refuelId = dash(vehicleId).recentRefuellings.first().id
@@ -501,7 +513,17 @@ class FullFlowUiTest {
         }
     }
 
+    private fun pruneUitestVehicles() {
+        runBlocking {
+            val repo = AutologApp.instance.container.repository
+            repo.observeVehicles().first()
+                .filter { it.name.startsWith("UITest") }
+                .forEach { repo.deleteVehicle(it.id) }
+        }
+    }
+
     private fun ensureAddVehicleScreen() {
+        pruneUitestVehicles()
         val onAdd = composeRule.onAllNodesWithTag(AddVehicleTags.SCREEN)
             .fetchSemanticsNodes().isNotEmpty()
         if (onAdd) return

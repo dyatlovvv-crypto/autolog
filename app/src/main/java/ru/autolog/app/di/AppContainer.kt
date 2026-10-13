@@ -10,7 +10,10 @@ import ru.autolog.app.data.sync.GoogleDriveBackupRepository
 
 class AppContainer(context: Context) {
     val database: AutologDatabase = AutologDatabase.getInstance(context)
-    val repository: AutologRepository = AutologRepository(database)
+    val repository: AutologRepository = AutologRepository(
+        db = database,
+        appContext = context.applicationContext,
+    )
     val formDraftStore: FormDraftStore = FormDraftStore(context)
     val settingsStore: UserSettingsStore = UserSettingsStore(context)
 

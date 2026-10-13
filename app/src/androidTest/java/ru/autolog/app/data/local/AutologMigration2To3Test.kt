@@ -52,16 +52,23 @@ class AutologMigration2To3Test {
         }
 
         val room = Room.databaseBuilder(context, AutologDatabase::class.java, dbName)
-            .addMigrations(AutologMigrations.MIGRATION_1_2, AutologMigrations.MIGRATION_2_3)
+            .addMigrations(
+                AutologMigrations.MIGRATION_1_2,
+                AutologMigrations.MIGRATION_2_3,
+                AutologMigrations.MIGRATION_3_4,
+                AutologMigrations.MIGRATION_4_5,
+                AutologMigrations.MIGRATION_5_6,
+            )
             .build()
         try {
             room.openHelper.writableDatabase.use { db ->
-                assertThat(db.version).isEqualTo(3)
+                assertThat(db.version).isEqualTo(6)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM vehicles")).isEqualTo(2)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM refuellings")).isEqualTo(2)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM services")).isEqualTo(2)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM reminders")).isEqualTo(1)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM expenses")).isEqualTo(1)
+                assertThat(scalar(db, "SELECT COUNT(*) FROM notes")).isEqualTo(0)
                 assertThat(text(db, "SELECT name FROM vehicles WHERE id = 1")).isEqualTo("Polo")
                 assertThat(text(db, "SELECT name FROM vehicles WHERE id = 2")).isEqualTo("Fiesta")
                 assertThat(
@@ -84,6 +91,9 @@ class AutologMigration2To3Test {
                     indexExists(db, "index_reminders_isActive_showPhoneNotifications_nextDueDateEpochMs"),
                 ).isTrue()
                 assertThat(indexExists(db, "index_refuellings_odometerKm")).isFalse()
+                assertThat(indexExists(db, "index_notes_vehicleId")).isTrue()
+                assertThat(indexExists(db, "index_notes_dateEpochMs")).isFalse()
+                assertThat(indexExists(db, "index_notes_vehicleId_dateEpochMs")).isFalse()
             }
         } finally {
             room.close()

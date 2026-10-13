@@ -70,4 +70,100 @@ object AutologMigrations {
             )
         }
     }
+
+    /** Free-text journal notes. Does not touch existing tables or rows. */
+    val MIGRATION_3_4 = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `notes` (
+                  `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                  `vehicleId` INTEGER NOT NULL,
+                  `dateEpochMs` INTEGER NOT NULL,
+                  `odometerKm` INTEGER,
+                  `text` TEXT NOT NULL,
+                  `createdAtEpochMs` INTEGER NOT NULL,
+                  FOREIGN KEY(`vehicleId`) REFERENCES `vehicles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_notes_vehicleId` ON `notes` (`vehicleId`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_notes_dateEpochMs` ON `notes` (`dateEpochMs`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_notes_vehicleId_dateEpochMs` ON `notes` (`vehicleId`, `dateEpochMs`)",
+            )
+        }
+    }
+
+    /** Merge journal notes into one notepad per vehicle. */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `notes_new` (
+                  `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                  `vehicleId` INTEGER NOT NULL,
+                  `text` TEXT NOT NULL,
+                  `updatedAtEpochMs` INTEGER NOT NULL,
+                  FOREIGN KEY(`vehicleId`) REFERENCES `vehicles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                """
+                INSERT INTO notes_new (vehicleId, text, updatedAtEpochMs)
+                SELECT
+                  vehicleId,
+                  COALESCE(
+                    (
+                      SELECT group_concat(text, char(10) || char(10))
+                      FROM (
+                        SELECT text FROM notes AS o
+                        WHERE o.vehicleId = n.vehicleId
+                        ORDER BY o.dateEpochMs ASC
+                      )
+                    ),
+                    ''
+                  ),
+                  COALESCE(MAX(COALESCE(dateEpochMs, createdAtEpochMs)), 0)
+                FROM notes AS n
+                GROUP BY vehicleId
+                """.trimIndent(),
+            )
+            db.execSQL("DROP TABLE IF EXISTS `notes`")
+            db.execSQL("ALTER TABLE `notes_new` RENAME TO `notes`")
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS `index_notes_vehicleId` ON `notes` (`vehicleId`)",
+            )
+        }
+    }
+
+    /** Per-vehicle PDF/photo documents (insurance, license, STS, …). */
+    val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `vehicle_documents` (
+                  `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                  `vehicleId` INTEGER NOT NULL,
+                  `title` TEXT NOT NULL,
+                  `mimeType` TEXT NOT NULL,
+                  `filePath` TEXT NOT NULL,
+                  `createdAtEpochMs` INTEGER NOT NULL,
+                  FOREIGN KEY(`vehicleId`) REFERENCES `vehicles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_vehicle_documents_vehicleId` ON `vehicle_documents` (`vehicleId`)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_vehicle_documents_vehicleId_createdAtEpochMs` ON `vehicle_documents` (`vehicleId`, `createdAtEpochMs`)",
+            )
+        }
+    }
 }

@@ -55,13 +55,16 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.autolog.app.AutologApp
+import ru.autolog.app.BuildConfig
 import ru.autolog.app.data.settings.AppBackground
 import ru.autolog.app.data.settings.AppPalette
 import ru.autolog.app.data.settings.ConsumptionUnit
 import ru.autolog.app.data.settings.SyncPeriod
 import ru.autolog.app.data.settings.UserSettings
 import ru.autolog.app.data.settings.VolumeUnit
+import ru.autolog.app.data.sync.CloudBackupGateway
 import ru.autolog.app.data.sync.CloudSyncWorker
+import ru.autolog.app.data.update.AppUpdateChecker
 import ru.autolog.app.ui.fluid.rubberBandOverscroll
 import ru.autolog.app.ui.glass.GlassPanel
 import ru.autolog.app.ui.glass.GlassScaffold
@@ -85,6 +88,9 @@ object SettingsTags {
     const val VEHICLE_SECTION = "settings_vehicle_section"
     const val DELETE_VEHICLE = "settings_delete_vehicle"
     const val DELETE_VEHICLE_CONFIRM = "settings_delete_vehicle_confirm"
+    const val UPDATE_SECTION = "settings_update_section"
+    const val UPDATE_CHECK = "settings_update_check"
+    const val UPDATE_INSTALL = "settings_update_install"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,7 +101,6 @@ fun SettingsScreen(
     val context = LocalContext.current
     val store = AutologApp.instance.container.settingsStore
     val repo = AutologApp.instance.container.repository
-    val googleDrive = AutologApp.instance.container.googleDrive
     val settings by store.settings.collectAsStateWithLifecycle(initialValue = UserSettings())
     val activeVehicle by repo.observeActiveVehicle()
         .collectAsStateWithLifecycle(initialValue = null)
@@ -108,6 +113,18 @@ fun SettingsScreen(
     var showGoogleRestoreConfirm by remember { mutableStateOf(false) }
     var errorDialog by remember { mutableStateOf<String?>(null) }
     var showDeleteVehicleConfirm by remember { mutableStateOf(false) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+    var pendingRelease by remember {
+        mutableStateOf<AppUpdateChecker.RemoteRelease?>(null)
+    }
+    val installPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // User returned from install-permission screen; they can tap Update again.
+    }
+
+    fun googleDrive(): CloudBackupGateway = AutologApp.instance.container.googleDrive
 
     val pickImage = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
@@ -152,13 +169,13 @@ fun SettingsScreen(
     }
 
     suspend fun persistLinkedAccount() {
-        val info = googleDrive.accountInfo() ?: return
+        val info = googleDrive().accountInfo() ?: return
         store.setGoogleAccount(info.email, info.displayName, info.photoUrl)
     }
 
     suspend fun uploadPhoneToCloud() {
         val json = withContext(Dispatchers.IO) { repo.exportBackupJson() }
-        withContext(Dispatchers.IO) { googleDrive.uploadSnapshot(json).getOrThrow() }
+        withContext(Dispatchers.IO) { googleDrive().uploadSnapshot(json).getOrThrow() }
         store.setLastCloudSyncEpochMs(System.currentTimeMillis())
         if (settings.syncPeriod == SyncPeriod.OFF) {
             store.setSyncPeriod(SyncPeriod.DAILY)
@@ -170,7 +187,7 @@ fun SettingsScreen(
     }
 
     suspend fun restoreFromGoogle() {
-        val json = withContext(Dispatchers.IO) { googleDrive.downloadSnapshot().getOrThrow() }
+        val json = withContext(Dispatchers.IO) { googleDrive().downloadSnapshot().getOrThrow() }
         withContext(Dispatchers.IO) { repo.restoreBackupJson(json).getOrThrow() }
         store.settings.first()
         store.setLastCloudSyncEpochMs(System.currentTimeMillis())
@@ -181,7 +198,7 @@ fun SettingsScreen(
         // Never wipe local DB here.
         persistLinkedAccount()
         val localHas = withContext(Dispatchers.IO) { repo.hasLocalJournalData() }
-        val meta = withContext(Dispatchers.IO) { googleDrive.findBackupMeta() }
+        val meta = withContext(Dispatchers.IO) { googleDrive().findBackupMeta() }
         when {
             meta == null -> {
                 if (localHas) uploadPhoneToCloud()
@@ -201,7 +218,7 @@ fun SettingsScreen(
                 if (result.resultCode != android.app.Activity.RESULT_OK) {
                     error("Не удалось войти в Google. Попробуйте ещё раз.")
                 }
-                googleDrive.completeSignIn(result.data).getOrThrow()
+                googleDrive().completeSignIn(result.data).getOrThrow()
                 afterSignInLinked()
             }.onFailure {
                 errorDialog = Formatters.userMessage(it, "Не удалось войти в Google")
@@ -213,7 +230,7 @@ fun SettingsScreen(
 
     fun launchGoogleSignIn() {
         runCatching {
-            googleSignInLauncher.launch(googleDrive.signInIntent())
+            googleSignInLauncher.launch(googleDrive().signInIntent())
         }.onFailure {
             errorDialog = Formatters.userMessage(it, "Не удалось открыть вход")
             message = errorDialog
@@ -387,7 +404,7 @@ fun SettingsScreen(
                                 scope.launch {
                                     busy = true
                                     runCatching {
-                                        googleDrive.signOut()
+                                        googleDrive().signOut()
                                         store.clearGoogleAccount()
                                         CloudSyncWorker.enqueue(context, SyncPeriod.OFF)
                                         message = "Google отвязан. Записи на телефоне на месте."
@@ -535,6 +552,103 @@ fun SettingsScreen(
                 )
             }
 
+            SettingsSection(title = "Обновления") {
+                Column(modifier = Modifier.testTag(SettingsTags.UPDATE_SECTION)) {
+                    Text(
+                        "Сейчас: ${BuildConfig.APP_VERSION}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Источник: GitHub ${BuildConfig.UPDATE_GITHUB_OWNER}/${BuildConfig.UPDATE_GITHUB_REPO}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                    )
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                updateBusy = true
+                                pendingRelease = null
+                                updateStatus = "Проверяю…"
+                                when (val result = AppUpdateChecker.checkForUpdate()) {
+                                    is AppUpdateChecker.CheckResult.UpToDate -> {
+                                        updateStatus =
+                                            "Актуально (в GitHub ${result.remote})"
+                                    }
+                                    is AppUpdateChecker.CheckResult.UpdateAvailable -> {
+                                        pendingRelease = result.release
+                                        updateStatus =
+                                            "Доступна ${result.release.versionName}"
+                                    }
+                                    is AppUpdateChecker.CheckResult.Failed -> {
+                                        updateStatus = result.message
+                                    }
+                                }
+                                updateBusy = false
+                            }
+                        },
+                        enabled = !updateBusy && !busy,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(SettingsTags.UPDATE_CHECK),
+                    ) {
+                        if (updateBusy && pendingRelease == null) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .padding(end = 8.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        Text("Проверить обновления")
+                    }
+                    pendingRelease?.let { release ->
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    updateBusy = true
+                                    updateStatus = "Скачиваю ${release.versionName}…"
+                                    runCatching {
+                                        if (!AppUpdateChecker.canInstallPackages(context)) {
+                                            installPermissionLauncher.launch(
+                                                AppUpdateChecker.installPermissionSettingsIntent(context),
+                                            )
+                                            updateStatus =
+                                                "Разрешите установку из этого приложения и нажмите снова"
+                                            return@runCatching
+                                        }
+                                        val apk = AppUpdateChecker.downloadApk(context, release)
+                                        updateStatus = "Установка…"
+                                        AppUpdateChecker.installApk(context, apk)
+                                        updateStatus =
+                                            "Открыл установщик ${release.versionName}"
+                                    }.onFailure {
+                                        updateStatus = Formatters.userMessage(
+                                            it,
+                                            "Не удалось обновить",
+                                        )
+                                    }
+                                    updateBusy = false
+                                }
+                            },
+                            enabled = !updateBusy,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp)
+                                .testTag(SettingsTags.UPDATE_INSTALL),
+                        ) { Text("Обновить до ${release.versionName}") }
+                    }
+                    updateStatus?.let { status ->
+                        Text(
+                            status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            }
+
             message?.let {
                 Text(it, color = MaterialTheme.colorScheme.primary)
             }
@@ -545,11 +659,12 @@ fun SettingsScreen(
     if (errorDialog != null) {
         AlertDialog(
             onDismissRequest = { errorDialog = null },
+            modifier = Modifier.testTag(SettingsTags.GOOGLE_ERROR_DIALOG),
             title = { Text("Google") },
             text = {
                 Text(
                     errorDialog.orEmpty(),
-                    modifier = Modifier.testTag(SettingsTags.GOOGLE_ERROR_DIALOG),
+                    modifier = Modifier.testTag("${SettingsTags.GOOGLE_ERROR_DIALOG}_text"),
                 )
             },
             confirmButton = {

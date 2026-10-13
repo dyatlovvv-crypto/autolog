@@ -17,6 +17,7 @@ class FakeCloudBackupGateway(
         photoUrl = null,
     ),
 ) : CloudBackupGateway {
+    @Volatile
     var uploadCalls: Int = 0
         private set
 

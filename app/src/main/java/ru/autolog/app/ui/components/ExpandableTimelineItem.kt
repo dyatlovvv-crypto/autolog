@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ru.autolog.app.ui.theme.AutologElevation
 import ru.autolog.app.ui.theme.AutologRadii
@@ -69,7 +70,10 @@ object TimelineTags {
 private val RoadAsphalt = Color(0xFF4A525A)
 private val RoadMarking = Color(0xFFF5F7FA)
 
-val RoadKmGutter = AutologSpace.xl
+/** Gutter between road rail and card for trip km + consumption. */
+val RoadKmGutter = 64.dp
+
+private val RoadCardGap = AutologSpace.sm
 
 @Composable
 fun TimelineRoadConnector(
@@ -93,26 +97,52 @@ internal fun TimelineKmPost(
     km: Int?,
     label: String?,
     modifier: Modifier = Modifier,
+    consumptionLabel: String? = null,
+    consumptionUnit: String? = null,
 ) {
+    val hasKm = km != null && km > 0 && !label.isNullOrBlank()
+    val hasConsumption = !consumptionLabel.isNullOrBlank() && !consumptionUnit.isNullOrBlank()
+    if (!hasKm && !hasConsumption) {
+        Spacer(modifier = modifier)
+        return
+    }
     Box(
-        modifier = modifier.padding(top = AutologSpace.lg),
+        modifier = modifier.padding(top = AutologSpace.md, end = AutologSpace.xs),
         contentAlignment = Alignment.TopCenter,
     ) {
-        if (km != null && km > 0 && !label.isNullOrBlank()) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                )
-                Text(
-                    text = "км",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
+        Surface(
+            color = MaterialTheme.colorScheme.background.copy(alpha = 0.94f),
+            shape = RoundedCornerShape(AutologSpace.sm),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = AutologSpace.xs),
+            ) {
+                if (hasKm) {
+                    Text(
+                        text = "$label км",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
+                if (hasConsumption) {
+                    if (hasKm) Spacer(modifier = Modifier.height(AutologSpace.xs))
+                    Text(
+                        text = "$consumptionLabel $consumptionUnit",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip,
+                    )
+                }
             }
         }
     }
@@ -139,6 +169,8 @@ fun ExpandableTimelineItem(
     moneyText: String? = null,
     roadKm: Int? = null,
     roadKmLabel: String? = null,
+    roadConsumptionLabel: String? = null,
+    roadConsumptionUnit: String? = null,
 ) {
     val tint = kind.tint()
     val icon = kind.icon()
@@ -155,7 +187,7 @@ fun ExpandableTimelineItem(
             .testTag(TimelineTags.item(kindKey, id)),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
-            Spacer(modifier = Modifier.width(AutologSpace.xl + RoadKmGutter))
+            Spacer(modifier = Modifier.width(AutologSpace.xl + RoadKmGutter + RoadCardGap))
             Surface(
                 modifier = Modifier
                     .weight(1f)
@@ -304,11 +336,14 @@ fun ExpandableTimelineItem(
             TimelineKmPost(
                 km = roadKm,
                 label = roadKmLabel,
+                consumptionLabel = roadConsumptionLabel,
+                consumptionUnit = roadConsumptionUnit,
                 modifier = Modifier
                     .width(RoadKmGutter)
                     .fillMaxHeight()
                     .testTag(TimelineTags.roadKm(kindKey, id)),
             )
+            Spacer(modifier = Modifier.width(RoadCardGap))
             Spacer(modifier = Modifier.weight(1f))
         }
     }

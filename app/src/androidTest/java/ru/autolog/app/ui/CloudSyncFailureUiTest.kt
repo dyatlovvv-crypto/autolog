@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -24,7 +25,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import ru.autolog.app.AutologApp
 import ru.autolog.app.MainActivity
+import ru.autolog.app.data.settings.SyncPeriod
 import ru.autolog.app.data.sync.CloudBackupGateway
+import ru.autolog.app.data.sync.CloudSyncWorker
 import ru.autolog.app.data.sync.FakeCloudBackupGateway
 import ru.autolog.app.data.sync.GoogleDriveBackupRepository
 import ru.autolog.app.ui.dashboard.DashboardTags
@@ -51,6 +54,7 @@ class CloudSyncFailureUiTest {
 
     @After
     fun cleanup() {
+        runCatching { dismissTransientUi() }
         val app = AutologApp.instance
         app.container.googleDrive = when (val g = realGateway) {
             is GoogleDriveBackupRepository -> g
@@ -59,9 +63,12 @@ class CloudSyncFailureUiTest {
         runBlocking {
             app.container.settingsStore.clearGoogleAccount()
             app.container.settingsStore.setLastCloudSyncEpochMs(null)
+            app.container.settingsStore.setSyncPeriod(SyncPeriod.OFF)
+            CloudSyncWorker.enqueue(app, SyncPeriod.OFF)
             createdVehicleId?.let { id ->
                 runCatching { app.container.repository.deleteVehicle(id) }
             }
+            createdVehicleId = null
         }
     }
 
@@ -78,16 +85,8 @@ class CloudSyncFailureUiTest {
 
         composeRule.onNodeWithText("Ещё не сохраняли в Google", substring = true)
             .assertIsDisplayed()
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_SYNC_NOW).performScrollTo().performClick()
-
-        composeRule.waitUntil(8_000) {
-            composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-            .assertIsDisplayed()
-            .assertTextContains("закончилось место", substring = true)
+        triggerSyncAndAwaitError(fake, "закончилось место")
+        composeRule.onNodeWithTag("${SettingsTags.GOOGLE_ERROR_DIALOG}_text")
             .assertTextContains("Освободите место", substring = true)
 
         assertEquals(1, fake.uploadCalls)
@@ -108,14 +107,7 @@ class CloudSyncFailureUiTest {
         )
         prepareLinkedSettings(fake)
         openSettingsGoogleSection()
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_SYNC_NOW).performScrollTo().performClick()
-        composeRule.waitUntil(8_000) {
-            composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-            .assertTextContains("Нет связи с Google", substring = true)
+        triggerSyncAndAwaitError(fake, "Нет связи с Google")
     }
 
     @Test
@@ -127,14 +119,7 @@ class CloudSyncFailureUiTest {
         )
         prepareLinkedSettings(fake)
         openSettingsGoogleSection()
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_SYNC_NOW).performScrollTo().performClick()
-        composeRule.waitUntil(8_000) {
-            composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-            .assertTextContains("пока недоступно", substring = true)
+        triggerSyncAndAwaitError(fake, "пока недоступно")
     }
 
     @Test
@@ -155,6 +140,31 @@ class CloudSyncFailureUiTest {
     private suspend fun appSettings() =
         AutologApp.instance.container.settingsStore.settings.first()
 
+    private fun triggerSyncAndAwaitError(fake: FakeCloudBackupGateway, textSubstring: String) {
+        assertTrue(AutologApp.instance.container.googleDrive === fake)
+        composeRule.onNodeWithTag(SettingsTags.GOOGLE_SYNC_NOW)
+            .assertIsDisplayed()
+            .performScrollTo()
+            .performClick()
+        composeRule.waitUntil(25_000) { fake.uploadCalls >= 1 }
+        // One UI may host AlertDialog in a separate window; match copy in any semantics node.
+        composeRule.waitUntil(8_000) {
+            composeRule.onAllNodesWithText(textSubstring, substring = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        assertTrue(
+            "expected error copy: $textSubstring",
+            composeRule.onAllNodesWithText(textSubstring, substring = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty(),
+        )
+        assertNull(
+            "failed sync must not mark lastCloudSync",
+            runBlocking { appSettings() }.lastCloudSyncEpochMs,
+        )
+    }
+
     private fun prepareLinkedSettings(fake: FakeCloudBackupGateway) {
         AutologApp.instance.container.googleDrive = fake
         runBlocking {
@@ -164,18 +174,49 @@ class CloudSyncFailureUiTest {
                 photoUrl = null,
             )
             AutologApp.instance.container.settingsStore.setLastCloudSyncEpochMs(null)
+            AutologApp.instance.container.settingsStore.setSyncPeriod(SyncPeriod.OFF)
+            CloudSyncWorker.enqueue(AutologApp.instance, SyncPeriod.OFF)
+        }
+        assertTrue(
+            "fake gateway must be installed",
+            AutologApp.instance.container.googleDrive === fake,
+        )
+    }
+
+    private fun dismissTransientUi() {
+        repeat(4) {
+            val hasDialog = composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+            val hasSettings = composeRule.onAllNodesWithTag(SettingsTags.ROOT)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+            val onDash = composeRule.onAllNodesWithTag(DashboardTags.ROOT)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+            if (onDash && !hasDialog) return
+            if (hasDialog || hasSettings) {
+                composeRule.runOnUiThread {
+                    composeRule.activity.onBackPressedDispatcher.onBackPressed()
+                }
+                composeRule.waitForIdle()
+            } else {
+                return
+            }
         }
     }
 
     private fun openSettingsGoogleSection() {
         // Always return to dashboard so settings recomposes with the injected gateway.
+        dismissTransientUi()
         repeat(3) {
             if (composeRule.onAllNodesWithTag(DashboardTags.ROOT).fetchSemanticsNodes().isNotEmpty()) {
                 return@repeat
             }
             if (composeRule.onAllNodesWithTag(SettingsTags.ROOT).fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_ERROR_DIALOG)
-                    .fetchSemanticsNodes().isNotEmpty()
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
             ) {
                 composeRule.runOnUiThread {
                     composeRule.activity.onBackPressedDispatcher.onBackPressed()

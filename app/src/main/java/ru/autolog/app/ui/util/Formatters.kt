@@ -27,6 +27,13 @@ object Formatters {
 
     fun consumptionUnitLabel(unit: ConsumptionUnit): String = unit.label
 
+    /** Compact unit for timeline road gutter. */
+    fun consumptionUnitShort(unit: ConsumptionUnit): String = when (unit) {
+        ConsumptionUnit.L_PER_100 -> "л/100"
+        ConsumptionUnit.KM_PER_L -> "км/л"
+        ConsumptionUnit.MPG -> "mpg"
+    }
+
     fun volumeLabel(liters: Double, unit: VolumeUnit): String = when (unit) {
         VolumeUnit.LITERS -> String.format(Locale.US, "%.1f л", liters)
         VolumeUnit.GALLONS -> String.format(Locale.US, "%.2f гал", liters / 3.785411784)

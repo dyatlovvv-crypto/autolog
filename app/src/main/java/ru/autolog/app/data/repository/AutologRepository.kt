@@ -1,13 +1,18 @@
 package ru.autolog.app.data.repository
 
+import android.content.Context
+import android.net.Uri
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import ru.autolog.app.data.local.AutologDatabase
+import ru.autolog.app.data.local.VehicleDocsStore
 import ru.autolog.app.data.local.entity.ExpenseEntity
+import ru.autolog.app.data.local.entity.NoteEntity
 import ru.autolog.app.data.local.entity.RefuellingEntity
 import ru.autolog.app.data.local.entity.ReminderEntity
 import ru.autolog.app.data.local.entity.ServiceEntity
+import ru.autolog.app.data.local.entity.VehicleDocumentEntity
 import ru.autolog.app.data.local.entity.VehicleEntity
 import ru.autolog.app.domain.VehicleLimits
 import ru.autolog.app.domain.consumption.ConsumptionCalculator
@@ -15,7 +20,10 @@ import ru.autolog.app.domain.consumption.ConsumptionCalculator.FullTankPoint
 import ru.autolog.app.domain.consumption.ConsumptionCalculator.RefuelPoint
 import ru.autolog.app.domain.reminder.ReminderForecast
 
-class AutologRepository(private val db: AutologDatabase) {
+class AutologRepository(
+    private val db: AutologDatabase,
+    private val appContext: Context,
+) {
 
     fun observeVehicles(): Flow<List<VehicleEntity>> = db.vehicleDao().observeAll()
 
@@ -24,26 +32,24 @@ class AutologRepository(private val db: AutologDatabase) {
     /** True if the phone has any vehicles (link must never wipe these). */
     suspend fun hasLocalJournalData(): Boolean = db.vehicleDao().getAll().isNotEmpty()
 
-    fun observeDashboard(vehicleId: Long): Flow<DashboardSnapshot> {
-        return combine(
-            db.vehicleDao().observeAll().map { list -> list.find { it.id == vehicleId } },
-            db.refuellingDao().observeByVehicle(vehicleId),
-            db.reminderDao().observeByVehicle(vehicleId),
-            db.expenseDao().observeByVehicle(vehicleId),
-            db.serviceDao().observeByVehicle(vehicleId),
-        ) { vehicle, refuels, reminders, expenses, services ->
-            buildDashboard(vehicle, refuels, reminders, expenses, services)
-        }
+    fun observeDashboard(vehicleId: Long): Flow<DashboardSnapshot> = combine(
+        db.vehicleDao().observeAll().map { list -> list.find { it.id == vehicleId } },
+        db.refuellingDao().observeByVehicle(vehicleId),
+        db.reminderDao().observeByVehicle(vehicleId),
+        db.expenseDao().observeByVehicle(vehicleId),
+        db.serviceDao().observeByVehicle(vehicleId),
+    ) { vehicle, refuels, reminders, expenses, services ->
+        buildDashboard(
+            vehicle = vehicle,
+            refuelsNewestFirst = refuels,
+            reminders = reminders,
+            expensesNewestFirst = expenses,
+            servicesNewestFirst = services,
+        )
     }
 
-    fun observeRefuellings(vehicleId: Long): Flow<List<RefuellingEntity>> =
-        db.refuellingDao().observeByVehicle(vehicleId)
-
-    fun observeServices(vehicleId: Long): Flow<List<ServiceEntity>> =
-        db.serviceDao().observeByVehicle(vehicleId)
-
-    fun observeExpenses(vehicleId: Long): Flow<List<ExpenseEntity>> =
-        db.expenseDao().observeByVehicle(vehicleId)
+    fun observeNotepad(vehicleId: Long): Flow<NoteEntity?> =
+        db.noteDao().observeNotepad(vehicleId)
 
     suspend fun addVehicle(
         name: String,
@@ -80,6 +86,7 @@ class AutologRepository(private val db: AutologDatabase) {
             ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
         val wasActive = vehicle.isActive
         db.vehicleDao().delete(vehicle)
+        VehicleDocsStore.deleteVehicleDir(appContext, id)
         if (wasActive) {
             val next = db.vehicleDao().getAll().firstOrNull()
             if (next != null) {
@@ -428,6 +435,76 @@ class AutologRepository(private val db: AutologDatabase) {
         refreshRemindersForVehicle(item.vehicleId)
     }
 
+    suspend fun saveNotepad(vehicleId: Long, text: String): Result<Unit> {
+        db.vehicleDao().getById(vehicleId)
+            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
+        val now = System.currentTimeMillis()
+        val existing = db.noteDao().getNotepad(vehicleId)
+        if (existing == null) {
+            if (text.isEmpty()) return Result.success(Unit)
+            db.noteDao().insert(
+                NoteEntity(
+                    vehicleId = vehicleId,
+                    text = text,
+                    updatedAtEpochMs = now,
+                ),
+            )
+        } else {
+            db.noteDao().update(
+                existing.copy(
+                    text = text,
+                    updatedAtEpochMs = now,
+                ),
+            )
+        }
+        return Result.success(Unit)
+    }
+
+    suspend fun getNotepad(vehicleId: Long): NoteEntity? =
+        db.noteDao().getNotepad(vehicleId)
+
+    fun observeVehicleDocuments(vehicleId: Long): Flow<List<VehicleDocumentEntity>> =
+        db.vehicleDocumentDao().observeByVehicle(vehicleId)
+
+    suspend fun addVehicleDocument(vehicleId: Long, uri: Uri): Result<Long> {
+        db.vehicleDao().getById(vehicleId)
+            ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
+        val copied = VehicleDocsStore.copyFromUri(appContext, vehicleId, uri)
+            ?: return Result.failure(
+                IllegalArgumentException("Нужен PDF или фото (JPG/PNG/WEBP)"),
+            )
+        val id = db.vehicleDocumentDao().insert(
+            VehicleDocumentEntity(
+                vehicleId = vehicleId,
+                title = copied.displayName,
+                mimeType = copied.mimeType,
+                filePath = copied.absolutePath,
+                createdAtEpochMs = System.currentTimeMillis(),
+            ),
+        )
+        return Result.success(id)
+    }
+
+    suspend fun deleteVehicleDocument(id: Long): Result<Unit> {
+        val doc = db.vehicleDocumentDao().getById(id)
+            ?: return Result.failure(IllegalArgumentException("Документ не найден"))
+        db.vehicleDocumentDao().deleteById(id)
+        VehicleDocsStore.deleteFile(doc.filePath)
+        return Result.success(Unit)
+    }
+
+    suspend fun getVehicleDocument(id: Long): VehicleDocumentEntity? =
+        db.vehicleDocumentDao().getById(id)
+
+    fun observeRefuellings(vehicleId: Long): Flow<List<RefuellingEntity>> =
+        db.refuellingDao().observeByVehicle(vehicleId)
+
+    fun observeServices(vehicleId: Long): Flow<List<ServiceEntity>> =
+        db.serviceDao().observeByVehicle(vehicleId)
+
+    fun observeExpenses(vehicleId: Long): Flow<List<ExpenseEntity>> =
+        db.expenseDao().observeByVehicle(vehicleId)
+
     suspend fun getRefuelling(id: Long) = db.refuellingDao().getById(id)
 
     suspend fun getReminder(id: Long) = db.reminderDao().getById(id)
@@ -488,6 +565,16 @@ class AutologRepository(private val db: AutologDatabase) {
                 )
             }
             vo.put("expenses", expenses)
+
+            val notepad = db.noteDao().getNotepad(v.id)
+            if (notepad != null) {
+                vo.put(
+                    "notepad",
+                    org.json.JSONObject()
+                        .put("text", notepad.text)
+                        .put("updatedAtEpochMs", notepad.updatedAtEpochMs),
+                )
+            }
 
             val services = org.json.JSONArray()
             db.serviceDao().getByVehicleOldestFirst(v.id).forEach { s ->
@@ -606,6 +693,40 @@ class AutologRepository(private val db: AutologDatabase) {
                             createdAtEpochMs = e.optLong("createdAtEpochMs", now),
                         ),
                     )
+                }
+            }
+
+            val notepad = vo.optJSONObject("notepad")
+            if (notepad != null) {
+                db.noteDao().insert(
+                    NoteEntity(
+                        vehicleId = newId,
+                        text = notepad.optString("text", ""),
+                        updatedAtEpochMs = notepad.optLong(
+                            "updatedAtEpochMs",
+                            System.currentTimeMillis(),
+                        ),
+                    ),
+                )
+            } else {
+                val notes = vo.optJSONArray("notes")
+                if (notes != null && notes.length() > 0) {
+                    val merged = buildString {
+                        for (j in 0 until notes.length()) {
+                            val n = notes.getJSONObject(j)
+                            if (isNotEmpty()) append("\n\n")
+                            append(n.optString("text", ""))
+                        }
+                    }
+                    if (merged.isNotBlank()) {
+                        db.noteDao().insert(
+                            NoteEntity(
+                                vehicleId = newId,
+                                text = merged,
+                                updatedAtEpochMs = now,
+                            ),
+                        )
+                    }
                 }
             }
 

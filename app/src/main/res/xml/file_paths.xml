@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="service_photos" path="service_photos/" />
+    <files-path name="vehicle_docs" path="vehicle_docs/" />
+    <files-path name="notepad_photos" path="notepad_photos/" />
     <cache-path name="camera_cache" path="camera/" />
+    <cache-path name="updates" path="updates/" />
 </paths>

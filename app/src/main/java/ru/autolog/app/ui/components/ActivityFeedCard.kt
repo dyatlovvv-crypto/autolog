@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.EventNote
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.outlined.CarRepair
 import androidx.compose.material.icons.outlined.Handyman
 import androidx.compose.material.icons.outlined.LocalCarWash
@@ -42,6 +43,8 @@ enum class ActivityKind {
     /** Прочий расход. */
     EXPENSE,
     REMINDER,
+    /** Free-text journal note. */
+    NOTE,
     /** Fallback / generic service (maps to TO icon). */
     SERVICE,
 }
@@ -54,6 +57,7 @@ fun ActivityKind.icon(): ImageVector = when (this) {
     ActivityKind.WASH -> Icons.Outlined.LocalCarWash
     ActivityKind.EXPENSE -> Icons.Outlined.Payments
     ActivityKind.REMINDER -> Icons.Outlined.NotificationsActive
+    ActivityKind.NOTE -> Icons.AutoMirrored.Outlined.StickyNote2
 }
 
 fun ActivityKind.tint(): Color = when (this) {
@@ -64,6 +68,7 @@ fun ActivityKind.tint(): Color = when (this) {
     ActivityKind.WASH -> AutologColors.Wash
     ActivityKind.EXPENSE -> AutologColors.Expense
     ActivityKind.REMINDER -> AutologColors.Reminder
+    ActivityKind.NOTE -> AutologColors.Note
 }
 
 fun ServiceKind.toActivityKind(): ActivityKind = when (this) {

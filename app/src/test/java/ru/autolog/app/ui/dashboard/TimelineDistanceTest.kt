@@ -34,6 +34,32 @@ class TimelineDistanceTest {
     }
 
     @Test
+    fun consumption_usesStoredSegmentValue() {
+        val newer = refuel(id = 2, odo = 50_500, t = 200, full = true, consumption = 8.0)
+        val older = refuel(id = 1, odo = 50_000, t = 100, full = true, consumption = null)
+        val timeline = listOf(TimelineEntry.Refuel(newer), TimelineEntry.Refuel(older))
+        assertEquals(8.0, TimelineDistance.consumptionLPer100SincePreviousFull(timeline, 0)!!, 0.001)
+        assertNull(TimelineDistance.consumptionLPer100SincePreviousFull(timeline, 1))
+    }
+
+    @Test
+    fun consumption_recomputesWhenStoredMissing() {
+        val newer = refuel(id = 2, odo = 50_500, t = 300, full = true, liters = 40.0)
+        val older = refuel(id = 1, odo = 50_000, t = 100, full = true, liters = 45.0)
+        val timeline = listOf(TimelineEntry.Refuel(newer), TimelineEntry.Refuel(older))
+        // 40 L / 500 km → 8.0 L/100
+        assertEquals(8.0, TimelineDistance.consumptionLPer100SincePreviousFull(timeline, 0)!!, 0.001)
+    }
+
+    @Test
+    fun consumption_nullForPartialFill() {
+        val partial = refuel(id = 2, odo = 50_200, t = 200, full = false, liters = 20.0)
+        val older = refuel(id = 1, odo = 50_000, t = 100, full = true, liters = 45.0)
+        val timeline = listOf(TimelineEntry.Refuel(partial), TimelineEntry.Refuel(older))
+        assertNull(TimelineDistance.consumptionLPer100SincePreviousFull(timeline, 0))
+    }
+
+    @Test
     fun kmSincePreviousTo_onlyCountsToAndStaysOffRoad() {
         val newer = service(id = 3, odo = 116_000, t = 300, type = ServiceKind.TO.name)
         val repair = service(id = 2, odo = 115_500, t = 200, type = ServiceKind.REPAIR.name)
@@ -63,14 +89,23 @@ class TimelineDistanceTest {
         assertEquals("238", TimelineDistance.formatKm(238))
     }
 
-    private fun refuel(id: Long, odo: Int, t: Long) = RefuellingEntity(
+    private fun refuel(
+        id: Long,
+        odo: Int,
+        t: Long,
+        full: Boolean = false,
+        liters: Double = 20.0,
+        consumption: Double? = null,
+    ) = RefuellingEntity(
         id = id,
         vehicleId = 1,
         dateEpochMs = t,
         odometerKm = odo,
-        volumeLiters = 20.0,
+        volumeLiters = liters,
         pricePerLiter = 50.0,
-        totalCost = 1000.0,
+        totalCost = liters * 50.0,
+        isTankFull = full,
+        consumptionLPer100Km = consumption,
         createdAtEpochMs = t,
     )
 

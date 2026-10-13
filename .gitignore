@@ -17,6 +17,7 @@
 *.aab
 app/release/
 keystore.properties
+keystore/
 *.jks
 *.keystore
 .cursor-tmp/

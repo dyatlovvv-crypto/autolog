@@ -25,6 +25,7 @@ object AutologColors {
     val Wash = Color(0xFF00838F)
     val Expense = Color(0xFF5E35B1)
     val Reminder = Color(0xFF0277BD)
+    val Note = Color(0xFF546E7A)
 
     /** Mesh blobs behind glass. */
     val BlobBlue = Color(0xFF5B8DEF)

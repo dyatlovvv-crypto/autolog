@@ -1,5 +1,6 @@
 package ru.autolog.app.ui.dashboard
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +15,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.StickyNote2
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
@@ -56,6 +63,7 @@ import ru.autolog.app.AutologApp
 import ru.autolog.app.data.local.entity.ReminderEntity
 import ru.autolog.app.data.repository.DashboardSnapshot
 import ru.autolog.app.data.repository.TimelineEntry
+import ru.autolog.app.data.settings.ConsumptionUnit
 import ru.autolog.app.data.settings.UserSettings
 import ru.autolog.app.domain.FuelType
 import ru.autolog.app.domain.ServiceChecklistCodec
@@ -92,6 +100,10 @@ object DashboardTags {
     const val OPEN_SETTINGS = "dashboard_open_settings"
     const val ACTIVITY_FEED = "dashboard_activity_feed"
     const val SERVICE_HUB_ADD_WASH = "service_hub_add_wash"
+    const val SERVICE_HUB_ADD_SECTION = "service_hub_add_section"
+    const val SERVICE_HUB_HISTORY_SECTION = "service_hub_history_section"
+    const val OPEN_NOTEPAD = "dashboard_open_notepad"
+    const val OPEN_DOCS = "dashboard_open_docs"
     fun serviceHubHistory(filter: String) = "service_hub_history_$filter"
     fun feedReminder(id: Long) = TimelineTags.item("REMINDER", id)
     fun feedRefuel(id: Long) = TimelineTags.item("REFUEL", id)
@@ -107,6 +119,8 @@ fun DashboardScreen(
     onAddReminder: () -> Unit,
     onAddService: (ServiceKind) -> Unit,
     onAddWash: () -> Unit,
+    onOpenNotepad: () -> Unit,
+    onOpenDocs: () -> Unit,
     onOpenServiceHistory: (HistoryFilter) -> Unit,
     onOpenAnalytics: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -122,6 +136,8 @@ fun DashboardScreen(
         .collectAsStateWithLifecycle(initialValue = UserSettings())
     var vehicleSelectorOpen by remember { mutableStateOf(false) }
     var serviceHubOpen by remember { mutableStateOf(false) }
+    var serviceHubAddOpen by remember { mutableStateOf(true) }
+    var serviceHubHistoryOpen by remember { mutableStateOf(false) }
     var expandedKey by remember { mutableStateOf<String?>(null) }
 
     GlassScaffold(
@@ -141,6 +157,20 @@ fun DashboardScreen(
                     }
                 },
                 actions = {
+                    if (state.vehicles.isNotEmpty()) {
+                        AccentIconButton(
+                            onClick = onOpenDocs,
+                            imageVector = Icons.Outlined.AttachFile,
+                            contentDescription = "Документы",
+                            modifier = Modifier.testTag(DashboardTags.OPEN_DOCS),
+                        )
+                        AccentIconButton(
+                            onClick = onOpenNotepad,
+                            imageVector = Icons.AutoMirrored.Outlined.StickyNote2,
+                            contentDescription = "Заметки",
+                            modifier = Modifier.testTag(DashboardTags.OPEN_NOTEPAD),
+                        )
+                    }
                     AccentIconButton(
                         onClick = onOpenAnalytics,
                         imageVector = Icons.Default.Analytics,
@@ -332,12 +362,23 @@ fun DashboardScreen(
                                 items = rows,
                                 key = { (_, entry) -> "${entry::class.simpleName}_${entry.id}" },
                             ) { (index, entry) ->
-                                val presentation = remember(entry, index, timeline) {
+                                val presentation = remember(entry, index, timeline, settings.consumptionUnit) {
                                     val toKm = TimelineDistance.kmSincePreviousTo(timeline, index)
-                                    timelinePresentation(entry, toKm)
+                                    val refuelKm = TimelineDistance.kmSincePreviousRefuel(timeline, index)
+                                    val segmentLPer100 =
+                                        TimelineDistance.consumptionLPer100SincePreviousFull(timeline, index)
+                                    timelinePresentation(
+                                        entry = entry,
+                                        kmSincePreviousTo = toKm,
+                                        kmSincePreviousRefuel = refuelKm,
+                                        segmentConsumptionLPer100 = segmentLPer100,
+                                        consumptionUnit = settings.consumptionUnit,
+                                    )
                                 }
                                 val key = "${presentation.kindKey}_${entry.id}"
                                 val roadKm = TimelineDistance.kmSincePreviousRefuel(timeline, index)
+                                val segmentLPer100 =
+                                    TimelineDistance.consumptionLPer100SincePreviousFull(timeline, index)
                                 ExpandableTimelineItem(
                                     kind = presentation.kind,
                                     kindKey = presentation.kindKey,
@@ -353,6 +394,12 @@ fun DashboardScreen(
                                     isLast = index == timeline.lastIndex,
                                     roadKm = roadKm,
                                     roadKmLabel = roadKm?.let { TimelineDistance.formatKm(it) },
+                                    roadConsumptionLabel = segmentLPer100?.let {
+                                        Formatters.consumptionValue(it, settings.consumptionUnit)
+                                    },
+                                    roadConsumptionUnit = segmentLPer100?.let {
+                                        Formatters.consumptionUnitShort(settings.consumptionUnit)
+                                    },
                                     onToggle = {
                                         expandedKey = if (expandedKey == key) null else key
                                     },
@@ -395,85 +442,112 @@ fun DashboardScreen(
             onDismissRequest = { serviceHubOpen = false },
             title = { Text("Сервис", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(AutologSpace.sm)) {
-                    Text("Добавить", style = MaterialTheme.typography.bodyMedium)
-                    TextButton(
-                        onClick = {
-                            serviceHubOpen = false
-                            onAddReminder()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag(DashboardTags.ADD_REMINDER),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                        )
-                        Spacer(modifier = Modifier.size(AutologSpace.sm))
-                        Text("Напоминание", style = MaterialTheme.typography.bodyMedium)
-                    }
-                    ServiceKind.entries.forEach { kind ->
-                        val activity = kind.toActivityKind()
-                        TextButton(
-                            onClick = {
-                                serviceHubOpen = false
-                                onAddService(kind)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("add_service_kind_${kind.name}"),
-                        ) {
-                            Icon(
-                                imageVector = activity.icon(),
-                                contentDescription = null,
-                                tint = activity.tint(),
-                            )
-                            Spacer(modifier = Modifier.size(AutologSpace.sm))
-                            Text(kind.label, style = MaterialTheme.typography.bodyMedium)
+                val hubScroll = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(hubScroll),
+                    verticalArrangement = Arrangement.spacedBy(AutologSpace.xs),
+                ) {
+                    ServiceHubSectionHeader(
+                        title = "Добавить",
+                        expanded = serviceHubAddOpen,
+                        testTag = DashboardTags.SERVICE_HUB_ADD_SECTION,
+                        onClick = { serviceHubAddOpen = !serviceHubAddOpen },
+                    )
+                    AnimatedVisibility(visible = serviceHubAddOpen) {
+                        Column(verticalArrangement = Arrangement.spacedBy(AutologSpace.xs)) {
+                            TextButton(
+                                onClick = {
+                                    serviceHubOpen = false
+                                    onAddReminder()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag(DashboardTags.ADD_REMINDER),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notifications,
+                                    contentDescription = null,
+                                )
+                                Spacer(modifier = Modifier.size(AutologSpace.sm))
+                                Text("Напоминание", style = MaterialTheme.typography.bodyMedium)
+                            }
+                            ServiceKind.entries.forEach { kind ->
+                                val activity = kind.toActivityKind()
+                                TextButton(
+                                    onClick = {
+                                        serviceHubOpen = false
+                                        onAddService(kind)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("add_service_kind_${kind.name}"),
+                                ) {
+                                    Icon(
+                                        imageVector = activity.icon(),
+                                        contentDescription = null,
+                                        tint = activity.tint(),
+                                    )
+                                    Spacer(modifier = Modifier.size(AutologSpace.sm))
+                                    Text(kind.label, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    serviceHubOpen = false
+                                    onAddWash()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag(DashboardTags.SERVICE_HUB_ADD_WASH),
+                            ) {
+                                Icon(
+                                    imageVector = ActivityKind.WASH.icon(),
+                                    contentDescription = null,
+                                    tint = ActivityKind.WASH.tint(),
+                                )
+                                Spacer(modifier = Modifier.size(AutologSpace.sm))
+                                Text("Мойка", style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
-                    TextButton(
-                        onClick = {
-                            serviceHubOpen = false
-                            onAddWash()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag(DashboardTags.SERVICE_HUB_ADD_WASH),
-                    ) {
-                        Icon(
-                            imageVector = ActivityKind.WASH.icon(),
-                            contentDescription = null,
-                            tint = ActivityKind.WASH.tint(),
-                        )
-                        Spacer(modifier = Modifier.size(AutologSpace.sm))
-                        Text("Мойка", style = MaterialTheme.typography.bodyMedium)
-                    }
 
-                    Text("История", style = MaterialTheme.typography.bodyMedium)
-                    listOf(
-                        HistoryFilter.TO to ActivityKind.TO,
-                        HistoryFilter.REPAIR to ActivityKind.REPAIR,
-                        HistoryFilter.PLANNED to ActivityKind.PLANNED,
-                        HistoryFilter.WASH to ActivityKind.WASH,
-                    ).forEach { (filter, activity) ->
-                        TextButton(
-                            onClick = {
-                                serviceHubOpen = false
-                                onOpenServiceHistory(filter)
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag(DashboardTags.serviceHubHistory(filter.name)),
-                        ) {
-                            Icon(
-                                imageVector = activity.icon(),
-                                contentDescription = null,
-                                tint = activity.tint(),
-                            )
-                            Spacer(modifier = Modifier.size(AutologSpace.sm))
-                            Text("История · ${filter.label}", style = MaterialTheme.typography.bodyMedium)
+                    ServiceHubSectionHeader(
+                        title = "История",
+                        expanded = serviceHubHistoryOpen,
+                        testTag = DashboardTags.SERVICE_HUB_HISTORY_SECTION,
+                        onClick = { serviceHubHistoryOpen = !serviceHubHistoryOpen },
+                    )
+                    AnimatedVisibility(visible = serviceHubHistoryOpen) {
+                        Column(verticalArrangement = Arrangement.spacedBy(AutologSpace.xs)) {
+                            listOf(
+                                HistoryFilter.TO to ActivityKind.TO,
+                                HistoryFilter.REPAIR to ActivityKind.REPAIR,
+                                HistoryFilter.PLANNED to ActivityKind.PLANNED,
+                                HistoryFilter.WASH to ActivityKind.WASH,
+                            ).forEach { (filter, activity) ->
+                                TextButton(
+                                    onClick = {
+                                        serviceHubOpen = false
+                                        onOpenServiceHistory(filter)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(DashboardTags.serviceHubHistory(filter.name)),
+                                ) {
+                                    Icon(
+                                        imageVector = activity.icon(),
+                                        contentDescription = null,
+                                        tint = activity.tint(),
+                                    )
+                                    Spacer(modifier = Modifier.size(AutologSpace.sm))
+                                    Text(
+                                        "История · ${filter.label}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -481,6 +555,36 @@ fun DashboardScreen(
             confirmButton = {
                 TextButton(onClick = { serviceHubOpen = false }) { Text("Отмена") }
             },
+        )
+    }
+}
+
+@Composable
+private fun ServiceHubSectionHeader(
+    title: String,
+    expanded: Boolean,
+    testTag: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AutologRadii.card))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+            .padding(vertical = AutologSpace.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Icon(
+            imageVector = if (expanded) {
+                Icons.Default.KeyboardArrowUp
+            } else {
+                Icons.Default.KeyboardArrowDown
+            },
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
@@ -651,6 +755,9 @@ private data class TimelinePresentation(
 private fun timelinePresentation(
     entry: TimelineEntry,
     kmSincePreviousTo: Int? = null,
+    kmSincePreviousRefuel: Int? = null,
+    segmentConsumptionLPer100: Double? = null,
+    consumptionUnit: ConsumptionUnit = ConsumptionUnit.L_PER_100,
 ): TimelinePresentation = when (entry) {
     is TimelineEntry.Refuel -> {
         val r = entry.entity
@@ -672,6 +779,15 @@ private fun timelinePresentation(
             kmText = "${r.odometerKm} км",
             moneyText = Formatters.money(r.totalCost),
             details = buildList {
+                kmSincePreviousRefuel?.let {
+                    add("С прошлой заправки · ${TimelineDistance.formatKm(it)} км")
+                }
+                segmentConsumptionLPer100?.let { lPer100 ->
+                    add(
+                        "Расход · ${Formatters.consumptionValue(lPer100, consumptionUnit)} " +
+                            Formatters.consumptionUnitLabel(consumptionUnit),
+                    )
+                }
                 add(
                     buildString {
                         append(r.volumeLiters)
