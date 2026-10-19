@@ -44,6 +44,11 @@
 # Coil
 -dontwarn coil.**
 
+# MapLibre
+-keep class org.maplibre.** { *; }
+-dontwarn org.maplibre.**
+-keep class com.google.gson.** { *; }
+
 # Kotlin / coroutines
 -dontwarn kotlinx.coroutines.**
 -keepclassmembers class kotlinx.coroutines.** { *; }

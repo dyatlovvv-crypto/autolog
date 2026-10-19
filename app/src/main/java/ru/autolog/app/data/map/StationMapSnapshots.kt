@@ -30,7 +30,7 @@ import org.json.JSONArray
 object StationMapSnapshots {
     private const val TAG = "StationMapSnap"
     private const val UA =
-        "Autolog/0.7.8 (Android; station snapshot; contact=github.com/dyatlovvv-crypto/autolog)"
+        "Autolog/0.8.1 (Android; station snapshot; contact=github.com/dyatlovvv-crypto/autolog)"
     private const val ZOOM = 14
     private const val OUT_W = 360
     private const val OUT_H = 180

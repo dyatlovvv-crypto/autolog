@@ -216,7 +216,7 @@ fun AutologNavHost() {
                         set("picked_station_lat", lat)
                         set("picked_station_lon", lon)
                     }
-                    // Pop on next frame: avoids WebView native crash while handling the tap.
+                    // Pop on next frame: avoids tearing the map down mid-touch.
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         if (navController.currentDestination?.route == Routes.GAS_MAP) {
                             navController.popBackStack()

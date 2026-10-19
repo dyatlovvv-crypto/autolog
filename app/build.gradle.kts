@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 35
 
-        val appVersionName = "0.7.8"
-        versionCode = 69
+        val appVersionName = "0.8.2"
+        versionCode = 73
         versionName = appVersionName
         resValue("string", "app_name", "Autolog $appVersionName")
         resValue("string", "app_version", appVersionName)
@@ -165,8 +165,9 @@ dependencies {
     ksp("androidx.room:room-compiler:2.6.1")
 
     implementation("androidx.work:work-runtime-ktx:2.10.0")
-    implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    // Native map (no  / no API key): OpenFreeMap style via MapLibre.
+    implementation("org.maplibre.gl:android-sdk:11.13.5")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")

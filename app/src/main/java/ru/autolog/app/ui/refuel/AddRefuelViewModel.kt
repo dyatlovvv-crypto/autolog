@@ -37,9 +37,8 @@ data class AddRefuelUiState(
     val showLowOdoConfirm: Boolean = false,
 ) {
     val hasStationMap: Boolean
-        get() = (stationLat != null && stationLon != null &&
-            stationLat.isFinite() && stationLon.isFinite()) ||
-            station.isNotBlank()
+        get() = stationLat != null && stationLon != null &&
+            stationLat.isFinite() && stationLon.isFinite()
 }
 
 class AddRefuelViewModel(
@@ -287,6 +286,13 @@ class AddRefuelViewModel(
         savedStateHandle[KEY_STATION_LON] = lon.toString()
         // Warm disk snapshot once — later opens only show the PNG.
         StationMapSnapshots.prefetchAsync(AutologApp.instance, lat, lon)
+        persistDraft()
+    }
+
+    /** Drop map pin only — keep station name and the refuel itself. */
+    fun clearStationMap() {
+        savedStateHandle[KEY_STATION_LAT] = ""
+        savedStateHandle[KEY_STATION_LON] = ""
         persistDraft()
     }
 

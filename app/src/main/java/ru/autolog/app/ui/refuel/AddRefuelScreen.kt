@@ -59,6 +59,7 @@ object AddRefuelTags {
     const val STATION = "add_refuel_station"
     const val TANK_FULL = "add_refuel_tank_full"
     const val OPEN_MAP = "add_refuel_open_map"
+    const val CLEAR_MAP = "add_refuel_clear_map"
     const val FUEL_TYPE = "add_refuel_fuel_type"
     const val DELETE = "add_refuel_delete"
     const val LOW_ODO_CONFIRM = "add_refuel_low_odo_confirm"
@@ -268,6 +269,17 @@ fun AddRefuelScreen(
                                 refuelId = state.editId,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            TextButton(
+                                onClick = viewModel::clearStationMap,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag(AddRefuelTags.CLEAR_MAP),
+                            ) {
+                                Text(
+                                    "Убрать отметку с карты",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
                         }
                         // Separate button: trailingIcon often misses taps after keyboard / filled form.
                         OutlinedButton(
@@ -278,10 +290,10 @@ fun AddRefuelScreen(
                             shape = GlassShapeLarge,
                         ) {
                             Text(
-                                if (state.station.isBlank()) {
-                                    "Выбрать АЗС на карте"
-                                } else {
-                                    "Сменить АЗС на карте"
+                                when {
+                                    state.hasStationMap -> "Сменить АЗС на карте"
+                                    state.station.isBlank() -> "Выбрать АЗС на карте"
+                                    else -> "Отметить АЗС на карте"
                                 },
                             )
                         }

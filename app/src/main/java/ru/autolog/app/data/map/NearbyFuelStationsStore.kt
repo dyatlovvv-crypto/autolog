@@ -20,7 +20,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Prefetches nearby fuel stations (Overpass + fallbacks) so the map opens with data ready.
+ * Prefetches nearby fuel stations so the map opens with data ready.
+ * Primary: https://gdebenz.ru `/api/nearby` + `/api/stations` (same catalogue as the site).
+ * Fallback: Overpass / Nominatim / Photon if gdebenz is down.
  */
 class NearbyFuelStationsStore(
     context: Context,
@@ -39,11 +41,15 @@ class NearbyFuelStationsStore(
         val lon: Double,
         val json: String,
         val fetchedAtEpochMs: Long,
+        val radiusM: Int = QUERY_RADIUS_M,
     )
 
     fun cachedOrNull(maxAgeMs: Long = CACHE_TTL_MS): Cache? {
         val c = cache ?: return null
+        if (c.radiusM < FAST_RADIUS_M) return null
         if (System.currentTimeMillis() - c.fetchedAtEpochMs > maxAgeMs) return null
+        // Drop broken cache from older builds (`out tags` without lat/lon).
+        if (!FuelStationsJson.hasGeoElements(c.json)) return null
         return c
     }
 
@@ -60,6 +66,7 @@ class NearbyFuelStationsStore(
             lon = lon,
             json = json,
             fetchedAtEpochMs = System.currentTimeMillis(),
+            radiusM = QUERY_RADIUS_M,
         )
     }
 
@@ -77,14 +84,7 @@ class NearbyFuelStationsStore(
                     distanceMeters(it.lat, it.lon, loc.latitude, loc.longitude) < REUSE_RADIUS_M
                 }
                 if (nearby != null) return@execute
-                val json = queryFuelStations(loc.latitude, loc.longitude) ?: return@execute
-                cache = Cache(
-                    lat = loc.latitude,
-                    lon = loc.longitude,
-                    json = json,
-                    fetchedAtEpochMs = System.currentTimeMillis(),
-                )
-                Log.d(TAG, "prefetch ok lat=${loc.latitude} lon=${loc.longitude}")
+                fetchStationsProgressive(loc.latitude, loc.longitude, onPartial = null)
             } catch (t: Throwable) {
                 Log.w(TAG, "prefetch fail: ${t.message}")
             } finally {
@@ -99,19 +99,90 @@ class NearbyFuelStationsStore(
      */
     fun getStations(lat: Double, lon: Double): String? {
         cachedOrNull()?.let { c ->
-            if (distanceMeters(c.lat, c.lon, lat, lon) < REUSE_RADIUS_M) {
-                Log.d(TAG, "cache hit")
+            if (
+                c.radiusM >= QUERY_RADIUS_M &&
+                distanceMeters(c.lat, c.lon, lat, lon) < REUSE_RADIUS_M
+            ) {
+                Log.d(TAG, "cache hit full")
                 return c.json
             }
         }
-        // Stale-but-present cache: show immediately while a refresh runs (caller may ignore).
-        val stale = cache
-        val json = queryFuelStations(lat, lon)
-        if (json != null) {
-            cache = Cache(lat, lon, json, System.currentTimeMillis())
-            return json
+        return fetchStationsProgressive(lat, lon, onPartial = null)
+    }
+
+    /**
+     * Fast nearby (gdebenz `/api/nearby`), then bbox expand (`/api/stations`).
+     * [onPartial] may be called on the worker thread (caller should post to UI).
+     */
+    fun fetchStationsProgressive(
+        lat: Double,
+        lon: Double,
+        onPartial: ((String) -> Unit)?,
+    ): String? {
+        cachedOrNull()?.let { c ->
+            if (
+                c.radiusM >= QUERY_RADIUS_M &&
+                distanceMeters(c.lat, c.lon, lat, lon) < REUSE_RADIUS_M
+            ) {
+                onPartial?.invoke(c.json)
+                return c.json
+            }
         }
-        return stale?.json ?: cachedOrNull(maxAgeMs = CACHE_TTL_MS * 2)?.json
+        cachedOrNull()?.json?.let { onPartial?.invoke(it) }
+
+        var merged: String? = null
+        val fast = runCatching {
+            GdebenzStationsClient.fetchNearbyElementsJson(lat, lon, FAST_RADIUS_KM)
+                ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+        }.onFailure {
+            if (it is InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw it
+            }
+            Log.w(TAG, "gdebenz nearby: ${it.message}")
+        }.getOrNull()
+        if (fast != null) {
+            merged = fast
+            putCache(lat, lon, fast, FAST_RADIUS_M)
+            onPartial?.invoke(fast)
+            Log.d(TAG, "gdebenz fast≈${FuelStationsJson.elementCount(fast)}")
+        }
+
+        val full = runCatching {
+            GdebenzStationsClient.fetchBboxElementsJson(lat, lon, QUERY_RADIUS_KM)
+                ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+        }.onFailure {
+            if (it is InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw it
+            }
+            Log.w(TAG, "gdebenz full: ${it.message}")
+        }.getOrNull()
+            ?: if (fast == null) {
+                queryFuelStationsLegacy(lat, lon)
+            } else {
+                null
+            }
+
+        if (full != null) {
+            merged = FuelStationsJson.mergeById(merged, full, lat, lon)
+            putCache(lat, lon, merged!!, QUERY_RADIUS_M)
+            onPartial?.invoke(merged)
+            Log.d(TAG, "gdebenz full≈${FuelStationsJson.elementCount(merged)}")
+            return merged
+        }
+
+        return merged ?: cachedOrNull()?.json
+    }
+
+    private fun putCache(lat: Double, lon: Double, json: String, radiusM: Int) {
+        cache = Cache(
+            lat = lat,
+            lon = lon,
+            json = json,
+            fetchedAtEpochMs = System.currentTimeMillis(),
+            radiusM = radiusM,
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -138,10 +209,15 @@ class NearbyFuelStationsStore(
     companion object {
         private const val TAG = "AutologMap"
         private const val CACHE_TTL_MS = 20 * 60_000L
-        private const val REUSE_RADIUS_M = 2_500.0
+        private const val REUSE_RADIUS_M = 8_000.0
+        /** First paint: nearby only (quick). */
+        private const val FAST_RADIUS_M = 8_000
+        private const val FAST_RADIUS_KM = 8
+        /** City + oblast. */
+        private const val QUERY_RADIUS_M = 45_000
+        private const val QUERY_RADIUS_KM = 45
         private const val HTTP_UA =
-            "Autolog/0.7.8 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
-        private const val MAX_ELEMENTS = 80
+            "Autolog/0.8.2 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
 
         private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val out = FloatArray(1)
@@ -151,7 +227,9 @@ class NearbyFuelStationsStore(
 
         fun queryFuelStations(lat: Double, lon: Double): String? {
             return try {
-                queryFuelStationsInner(lat, lon)
+                GdebenzStationsClient.fetchElementsJson(lat, lon, QUERY_RADIUS_KM)
+                    ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+                    ?: queryFuelStationsLegacy(lat, lon)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 Log.d(TAG, "query interrupted (screen closed)")
@@ -162,76 +240,99 @@ class NearbyFuelStationsStore(
             }
         }
 
-        private fun queryFuelStationsInner(lat: Double, lon: Double): String? {
-            val aroundM = 5_000
-            // Nodes-first: much faster than full nwr on busy Overpass mirrors.
+        /** Last resort if gdebenz.ru is unavailable. */
+        private fun queryFuelStationsLegacy(lat: Double, lon: Double): String? {
+            return queryOverpassFuel(lat, lon, QUERY_RADIUS_M, timeoutSec = 14, deadlineSec = 16)
+                ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+                ?: queryNominatimFuel(lat, lon)
+                    ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+                ?: queryPhotonFuel(lat, lon)
+                    ?.let { FuelStationsJson.sortAndCapByDistance(it, lat, lon) }
+        }
+
+        /**
+         * Overpass fuel POIs with coordinates.
+         * Important: use `out center` / `out;` — NOT `out tags` (tags-only has no lat/lon).
+         */
+        private fun queryOverpassFuel(
+            lat: Double,
+            lon: Double,
+            aroundM: Int,
+            timeoutSec: Int,
+            deadlineSec: Int,
+        ): String? {
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("fuel query cancelled")
+            }
+            // Nodes first (fast); include ways with center for area-mapped АЗС.
             val q = """
-                [out:json][timeout:12];
+                [out:json][timeout:$timeoutSec];
                 (
                   node["amenity"="fuel"](around:$aroundM,$lat,$lon);
                   way["amenity"="fuel"](around:$aroundM,$lat,$lon);
                 );
-                out center tags;
+                out center;
             """.trimIndent()
             val endpoints = listOf(
                 "https://overpass.openstreetmap.ru/cgi/interpreter",
                 "https://lz4.overpass-api.de/api/interpreter",
-                "https://overpass.osm.ch/api/interpreter",
                 "https://overpass-api.de/api/interpreter",
             )
-            val pool = Executors.newFixedThreadPool(endpoints.size.coerceAtMost(3))
+            // Hit RU mirror first (no wait on slow EU), then race backups briefly.
+            postOverpass(
+                endpoints.first(),
+                q,
+                connectMs = 3_500,
+                readMs = timeoutSec * 1000,
+            )?.let { body ->
+                if (FuelStationsJson.hasGeoElements(body)) {
+                    Log.d(TAG, "overpass RU ok around=$aroundM")
+                    return body
+                }
+            }
+            if (Thread.currentThread().isInterrupted) {
+                throw InterruptedException("fuel query cancelled")
+            }
+            val pool = Executors.newFixedThreadPool(2)
             try {
                 val ecs = ExecutorCompletionService<String?>(pool)
-                endpoints.forEach { ep ->
-                    ecs.submit(Callable { postOverpass(ep, q) })
+                endpoints.drop(1).forEach { ep ->
+                    ecs.submit(
+                        Callable {
+                            postOverpass(ep, q, connectMs = 3_500, readMs = timeoutSec * 1000)
+                        },
+                    )
                 }
-                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(14)
-                for (i in endpoints.indices) {
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(deadlineSec.toLong())
+                repeat(endpoints.size - 1) {
                     if (Thread.currentThread().isInterrupted) {
                         throw InterruptedException("fuel query cancelled")
                     }
                     val waitNs = (deadline - System.nanoTime()).coerceAtLeast(0)
-                    val fut = ecs.poll(waitNs, TimeUnit.NANOSECONDS) ?: break
+                    val fut = ecs.poll(waitNs, TimeUnit.NANOSECONDS) ?: return@repeat
                     val body = runCatching { fut.get() }.getOrNull()
-                    val trimmed = body?.let { trimElements(it) }
-                    if (!trimmed.isNullOrBlank() && hasFuelElements(trimmed)) {
-                        Log.d(TAG, "overpass ok, bytes=${trimmed.length}")
-                        return trimmed
+                    if (!body.isNullOrBlank() && FuelStationsJson.hasGeoElements(body)) {
+                        Log.d(TAG, "overpass ok around=$aroundM bytes=${body.length}")
+                        return body
                     }
                 }
             } finally {
                 pool.shutdownNow()
             }
-            if (Thread.currentThread().isInterrupted) {
-                throw InterruptedException("fuel query cancelled")
-            }
-            Log.w(TAG, "overpass all failed, trying fallbacks")
-            return queryNominatimFuel(lat, lon) ?: queryPhotonFuel(lat, lon)
+            return null
         }
 
-        private fun trimElements(body: String): String? {
-            return runCatching {
-                val root = JSONObject(body)
-                val els = root.optJSONArray("elements") ?: return body
-                if (els.length() <= MAX_ELEMENTS) return body
-                val trimmed = JSONArray()
-                for (i in 0 until MAX_ELEMENTS) trimmed.put(els.get(i))
-                root.put("elements", trimmed).toString()
-            }.getOrNull()
-        }
-
-        private fun hasFuelElements(body: String): Boolean {
-            return runCatching {
-                JSONObject(body).optJSONArray("elements")?.length()?.let { it > 0 } == true
-            }.getOrDefault(false)
-        }
-
-        private fun postOverpass(endpoint: String, query: String): String? {
+        private fun postOverpass(
+            endpoint: String,
+            query: String,
+            connectMs: Int,
+            readMs: Int,
+        ): String? {
             return try {
                 val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
-                    connectTimeout = 6_000
-                    readTimeout = 12_000
+                    connectTimeout = connectMs
+                    readTimeout = readMs
                     doOutput = true
                     setRequestProperty(
                         "Content-Type",
@@ -261,7 +362,7 @@ class NearbyFuelStationsStore(
         }
 
         private fun queryNominatimFuel(lat: Double, lon: Double): String? {
-            val delta = 0.06
+            val delta = 0.50
             val south = lat - delta
             val north = lat + delta
             val west = lon - delta / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
@@ -271,15 +372,16 @@ class NearbyFuelStationsStore(
             val vb = java.net.URLEncoder.encode(viewbox, "UTF-8")
             val url =
                 "https://nominatim.openstreetmap.org/search?format=jsonv2&q=$q" +
-                    "&limit=50&bounded=1&viewbox=$vb"
+                    "&limit=100&bounded=1&viewbox=$vb"
             return try {
                 val raw = httpGet(url) ?: return null
                 val arr = JSONArray(raw)
                 val elements = JSONArray()
-                for (i in 0 until arr.length().coerceAtMost(MAX_ELEMENTS)) {
+                for (i in 0 until arr.length().coerceAtMost(FuelStationsJson.MAX_ELEMENTS)) {
                     val o = arr.optJSONObject(i) ?: continue
                     val el = JSONObject()
                     el.put("type", "node")
+                    el.put("id", o.optLong("osm_id", i.toLong()))
                     el.put("lat", o.optDouble("lat"))
                     el.put("lon", o.optDouble("lon"))
                     val tags = JSONObject()
@@ -301,18 +403,19 @@ class NearbyFuelStationsStore(
 
         private fun queryPhotonFuel(lat: Double, lon: Double): String? {
             val url =
-                "https://photon.komoot.io/api/?q=fuel&lat=$lat&lon=$lon&limit=50&osm_tag=amenity:fuel"
+                "https://photon.komoot.io/api/?q=fuel&lat=$lat&lon=$lon&limit=100&osm_tag=amenity:fuel"
             return try {
                 val raw = httpGet(url) ?: return null
                 val features = JSONObject(raw).optJSONArray("features") ?: return null
                 val elements = JSONArray()
-                for (i in 0 until features.length().coerceAtMost(MAX_ELEMENTS)) {
+                for (i in 0 until features.length().coerceAtMost(FuelStationsJson.MAX_ELEMENTS)) {
                     val f = features.optJSONObject(i) ?: continue
                     val coords = f.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
                     if (coords.length() < 2) continue
                     val props = f.optJSONObject("properties")
                     val el = JSONObject()
                     el.put("type", "node")
+                    el.put("id", props?.optLong("osm_id", i.toLong()) ?: i.toLong())
                     el.put("lon", coords.optDouble(0))
                     el.put("lat", coords.optDouble(1))
                     val tags = JSONObject()
@@ -336,8 +439,8 @@ class NearbyFuelStationsStore(
         private fun httpGet(url: String): String? {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
-                connectTimeout = 8_000
-                readTimeout = 10_000
+                connectTimeout = 6_000
+                readTimeout = 8_000
                 setRequestProperty("User-Agent", HTTP_UA)
                 setRequestProperty("Accept", "application/json")
             }

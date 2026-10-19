@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
 
     private val locationPermission = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
-    ) { /* map screen uses WebView geolocation after grant */ }
+    ) { /* map screen uses location after grant */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
