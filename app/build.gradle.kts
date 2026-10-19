@@ -166,7 +166,7 @@ dependencies {
 
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    // Native map (no  / no API key): OpenFreeMap style via MapLibre.
+    // Native map (no API key): OpenFreeMap style via MapLibre.
     implementation("org.maplibre.gl:android-sdk:11.13.5")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
