@@ -88,6 +88,7 @@ object ServiceTags {
     const val CHECKLIST_ADD = "service_checklist_add"
     const val ATTACH = "service_attach"
     const val DELETE = "service_delete"
+    const val DELETE_CONFIRM = "service_delete_confirm"
 }
 
 fun createCameraCaptureFile(context: Context): Pair<File, Uri> {
@@ -479,10 +480,13 @@ fun ServiceScreen(
             onDismissRequest = { confirmDelete = false },
             title = { Text("Удалить сервис?") },
             confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = false
-                    vm.delete(onDeleted)
-                }) { Text("Удалить") }
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        vm.delete(onDeleted)
+                    },
+                    modifier = Modifier.testTag(ServiceTags.DELETE_CONFIRM),
+                ) { Text("Удалить") }
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Отмена") } },
         )

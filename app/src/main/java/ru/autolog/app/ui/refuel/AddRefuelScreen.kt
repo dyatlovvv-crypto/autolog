@@ -48,6 +48,7 @@ import ru.autolog.app.ui.glass.GlassScaffold
 import ru.autolog.app.ui.glass.GlassShapeLarge
 import ru.autolog.app.ui.glass.GlassTopAppBar
 import ru.autolog.app.ui.glass.glassFieldColors
+import ru.autolog.app.ui.map.StationMiniMap
 
 object AddRefuelTags {
     const val SCREEN = "add_refuel_screen"
@@ -85,12 +86,25 @@ fun AddRefuelScreen(
     var fuelMenuOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        // Prefetch АЗС while the user fills liters/price — map should open with markers ready.
+        AutologApp.instance.container.fuelStations.prefetchAsync()
+    }
+
     LaunchedEffect(backStackEntry) {
         val handle = backStackEntry?.savedStateHandle ?: return@LaunchedEffect
         handle.getStateFlow<String?>("picked_station", null).collectLatest { name ->
             if (name != null) {
-                viewModel.onStation(name)
+                val lat = handle.get<Double>("picked_station_lat")
+                val lon = handle.get<Double>("picked_station_lon")
+                if (lat != null && lon != null && lat.isFinite() && lon.isFinite()) {
+                    viewModel.onStationPicked(name, lat, lon)
+                } else {
+                    viewModel.onStation(name)
+                }
                 handle["picked_station"] = null
+                handle.remove<Double>("picked_station_lat")
+                handle.remove<Double>("picked_station_lon")
             }
         }
     }
@@ -246,6 +260,15 @@ fun AddRefuelScreen(
                             shape = GlassShapeLarge,
                             colors = glassFieldColors(),
                         )
+                        if (state.hasStationMap) {
+                            StationMiniMap(
+                                lat = state.stationLat,
+                                lon = state.stationLon,
+                                label = state.station.ifBlank { null },
+                                refuelId = state.editId,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                         // Separate button: trailingIcon often misses taps after keyboard / filled form.
                         OutlinedButton(
                             onClick = onPickStationOnMap,

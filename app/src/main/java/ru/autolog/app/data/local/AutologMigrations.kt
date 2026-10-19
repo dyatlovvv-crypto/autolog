@@ -166,4 +166,12 @@ object AutologMigrations {
             )
         }
     }
+
+    /** Station coordinates on refuellings for mini-map in history. */
+    val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `refuellings` ADD COLUMN `stationLat` REAL")
+            db.execSQL("ALTER TABLE `refuellings` ADD COLUMN `stationLon` REAL")
+        }
+    }
 }

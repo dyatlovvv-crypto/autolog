@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 35
 
-        val appVersionName = "0.7.3"
-        versionCode = 64
+        val appVersionName = "0.7.8"
+        versionCode = 69
         versionName = appVersionName
         resValue("string", "app_name", "Autolog $appVersionName")
         resValue("string", "app_version", appVersionName)
@@ -28,6 +28,8 @@ android {
         buildConfigField("String", "AUTHOR_MARK", "\"© СпустяРуковаРекордс\"")
         buildConfigField("String", "UPDATE_GITHUB_OWNER", "\"dyatlovvv-crypto\"")
         buildConfigField("String", "UPDATE_GITHUB_REPO", "\"autolog\"")
+        // Overridden per buildType: Espresso pick on map for instrumented tests.
+        buildConfigField("boolean", "SHOW_MAP_TEST_PICK", "false")
 
         val localProps = Properties().apply {
             val f = rootProject.file("local.properties")
@@ -57,6 +59,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Same keystore as release: can update a store/release install without uninstall.
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            buildConfigField("boolean", "SHOW_MAP_TEST_PICK", "true")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -67,8 +76,27 @@ android {
             if (keystorePropsFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            buildConfigField("boolean", "SHOW_MAP_TEST_PICK", "false")
+        }
+        /**
+         * UI-test target: release signing (no wipe / no uninstall of user app),
+         * minify off so Compose semantics stay stable. Ship store builds via [release].
+         */
+        create("releaseTest") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            isDebuggable = true
+            isMinifyEnabled = false
+            isShrinkResources = false
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            buildConfigField("boolean", "SHOW_MAP_TEST_PICK", "true")
         }
     }
+
+    // Instrument androidTest against release-signed APK, not debug.
+    testBuildType = "releaseTest"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -107,9 +135,10 @@ ksp {
 
 tasks.register("verifyAndInstall") {
     group = "verification"
-    description = "Run connectedDebugAndroidTest, then installDebug"
-    dependsOn("connectedDebugAndroidTest", "installDebug")
-    tasks.findByName("installDebug")?.mustRunAfter("connectedDebugAndroidTest")
+    description =
+        "UI tests on releaseTest, then install store release APK (same signing, no wipe)"
+    dependsOn("connectedReleaseTestAndroidTest", "installRelease")
+    tasks.findByName("installRelease")?.mustRunAfter("connectedReleaseTestAndroidTest")
 }
 
 dependencies {
@@ -165,4 +194,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    // Compose UI tests run on releaseTest (see testBuildType), not debug.
+    add("releaseTestImplementation", "androidx.compose.ui:ui-test-manifest")
+    add("releaseTestImplementation", "androidx.compose.ui:ui-tooling")
 }

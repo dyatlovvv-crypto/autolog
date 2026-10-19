@@ -4,9 +4,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -295,7 +297,9 @@ fun DashboardScreen(
                     }
                     item(key = "metrics") {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min),
                             horizontalArrangement = Arrangement.spacedBy(AutologSpace.sm),
                         ) {
                             ConsumptionPairCard(
@@ -317,10 +321,14 @@ fun DashboardScreen(
                                 } else {
                                     Formatters.consumptionUnitLabel(settings.consumptionUnit)
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                             )
                             Column(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight(),
                                 verticalArrangement = Arrangement.spacedBy(AutologSpace.sm),
                             ) {
                                 maintenanceSlots.forEachIndexed { index, slot ->
@@ -412,6 +420,13 @@ fun DashboardScreen(
                                     roadConsumptionUnit = segmentLPer100?.let {
                                         Formatters.consumptionUnitShort(settings.consumptionUnit)
                                     },
+                                    stationLat = (entry as? TimelineEntry.Refuel)?.entity?.stationLat,
+                                    stationLon = (entry as? TimelineEntry.Refuel)?.entity?.stationLon,
+                                    stationLabel = (entry as? TimelineEntry.Refuel)?.entity?.stationName,
+                                    // Expanded row / refuel screen only — not collapsed feed.
+                                    showStationMap = entry is TimelineEntry.Refuel &&
+                                        entry.entity.stationLat != null &&
+                                        entry.entity.stationLon != null,
                                     onToggle = {
                                         expandedKey = if (expandedKey == key) null else key
                                     },
@@ -430,15 +445,6 @@ fun DashboardScreen(
                                             is TimelineEntry.Reminder -> onOpenReminder(entry.id)
                                             is TimelineEntry.Service -> onEditService(entry.id)
                                         }
-                                    },
-                                    onDelete = {
-                                        when (entry) {
-                                            is TimelineEntry.Refuel -> viewModel.deleteRefuelling(entry.id)
-                                            is TimelineEntry.Expense -> viewModel.deleteExpense(entry.id)
-                                            is TimelineEntry.Reminder -> viewModel.deleteReminder(entry.id)
-                                            is TimelineEntry.Service -> viewModel.deleteService(entry.id)
-                                        }
-                                        if (expandedKey == key) expandedKey = null
                                     },
                                 )
                             }
@@ -655,66 +661,73 @@ private fun ConsumptionPairCard(
         tonalElevation = AutologElevation.card,
         shadowElevation = 0.dp,
     ) {
-        Column(modifier = Modifier.padding(AutologSpace.md)) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(AutologSpace.md),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
             Text(
                 text = "Расход",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = "Последний",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = AutologSpace.sm),
-            )
-            Text(
-                text = lastValue,
-                style = if (lastEmpty) {
-                    MaterialTheme.typography.labelSmall
-                } else {
-                    MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                },
-                color = if (lastEmpty) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                modifier = Modifier
-                    .padding(top = AutologSpace.xs)
-                    .testTag(DashboardTags.LAST_CONSUMPTION),
-            )
-            Text(
-                text = lastUnit,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Средний",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = AutologSpace.sm),
-            )
-            Text(
-                text = avgValue,
-                style = if (avgEmpty) {
-                    MaterialTheme.typography.labelSmall
-                } else {
-                    MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                },
-                color = if (avgEmpty) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.primary
-                },
-                modifier = Modifier
-                    .padding(top = AutologSpace.xs)
-                    .testTag(DashboardTags.AVG_CONSUMPTION),
-            )
-            Text(
-                text = avgUnit,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column {
+                Text(
+                    text = "Последний",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = lastValue,
+                    style = if (lastEmpty) {
+                        MaterialTheme.typography.labelSmall
+                    } else {
+                        MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    },
+                    color = if (lastEmpty) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier
+                        .padding(top = AutologSpace.xs)
+                        .testTag(DashboardTags.LAST_CONSUMPTION),
+                )
+                Text(
+                    text = lastUnit,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Column {
+                Text(
+                    text = "Средний",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = avgValue,
+                    style = if (avgEmpty) {
+                        MaterialTheme.typography.labelSmall
+                    } else {
+                        MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    },
+                    color = if (avgEmpty) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier
+                        .padding(top = AutologSpace.xs)
+                        .testTag(DashboardTags.AVG_CONSUMPTION),
+                )
+                Text(
+                    text = avgUnit,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

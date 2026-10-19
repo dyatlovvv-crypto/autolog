@@ -34,6 +34,9 @@ data class RefuellingEntity(
     /** Full tank — used for segment consumption (L/100 km) between full fills. */
     val isTankFull: Boolean = false,
     val stationName: String? = null,
+    /** WGS84 from map pick; null if АЗС entered manually or old records. */
+    val stationLat: Double? = null,
+    val stationLon: Double? = null,
     val note: String? = null,
     /**
      * Cached L/100 km for the segment ending at this fill (full-tank chain).

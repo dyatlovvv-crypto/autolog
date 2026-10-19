@@ -58,11 +58,12 @@ class AutologMigration2To3Test {
                 AutologMigrations.MIGRATION_3_4,
                 AutologMigrations.MIGRATION_4_5,
                 AutologMigrations.MIGRATION_5_6,
+                AutologMigrations.MIGRATION_6_7,
             )
             .build()
         try {
             room.openHelper.writableDatabase.use { db ->
-                assertThat(db.version).isEqualTo(6)
+                assertThat(db.version).isEqualTo(7)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM vehicles")).isEqualTo(2)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM refuellings")).isEqualTo(2)
                 assertThat(scalar(db, "SELECT COUNT(*) FROM services")).isEqualTo(2)
@@ -78,6 +79,12 @@ class AutologMigration2To3Test {
                     text(db, "SELECT photoPathsJson FROM services WHERE id = 11"),
                 ).contains("/tmp/photo.jpg")
                 assertThat(scalar(db, "SELECT odometerKm FROM refuellings WHERE id = 21")).isEqualTo(80_820)
+                db.query("PRAGMA table_info(`refuellings`)").use { c ->
+                    val cols = mutableSetOf<String>()
+                    while (c.moveToNext()) cols += c.getString(c.getColumnIndexOrThrow("name"))
+                    assertThat(cols).contains("stationLat")
+                    assertThat(cols).contains("stationLon")
+                }
                 assertThat(
                     indexExists(db, "index_refuellings_vehicleId_isTankFull_dateEpochMs"),
                 ).isTrue()

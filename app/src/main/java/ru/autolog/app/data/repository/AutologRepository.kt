@@ -118,6 +118,8 @@ class AutologRepository(
         isTankFull: Boolean,
         stationName: String?,
         fuelType: String?,
+        stationLat: Double? = null,
+        stationLon: Double? = null,
     ): Result<Unit> {
         val existing = db.refuellingDao().getById(id)
             ?: return Result.failure(IllegalArgumentException("Заправка не найдена"))
@@ -130,6 +132,8 @@ class AutologRepository(
             totalCost = volumeLiters * pricePerLiter,
             isTankFull = isTankFull,
             stationName = stationName?.trim()?.ifEmpty { null },
+            stationLat = stationLat,
+            stationLon = stationLon,
             fuelType = fuelType,
             consumptionLPer100Km = null,
         )
@@ -148,6 +152,8 @@ class AutologRepository(
         isTankFull: Boolean,
         stationName: String?,
         fuelType: String?,
+        stationLat: Double? = null,
+        stationLon: Double? = null,
     ): Result<Long> {
         val vehicle = db.vehicleDao().getById(vehicleId)
             ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
@@ -162,6 +168,8 @@ class AutologRepository(
             totalCost = volumeLiters * pricePerLiter,
             isTankFull = isTankFull,
             stationName = stationName?.trim()?.ifEmpty { null },
+            stationLat = stationLat,
+            stationLon = stationLon,
             fuelType = fuelType,
             consumptionLPer100Km = null,
             createdAtEpochMs = now,
@@ -423,6 +431,19 @@ class AutologRepository(
         refreshRemindersForVehicle(item.vehicleId)
     }
 
+    /** Backfill / update map point for an existing refuel (geocode or map pick). */
+    suspend fun updateRefuelStationCoords(id: Long, lat: Double, lon: Double): Result<Unit> {
+        if (!lat.isFinite() || !lon.isFinite()) {
+            return Result.failure(IllegalArgumentException("Некорректные координаты"))
+        }
+        val existing = db.refuellingDao().getById(id)
+            ?: return Result.failure(IllegalArgumentException("Заправка не найдена"))
+        db.refuellingDao().update(
+            existing.copy(stationLat = lat, stationLon = lon),
+        )
+        return Result.success(Unit)
+    }
+
     suspend fun deleteReminder(id: Long) {
         val item = db.reminderDao().getById(id) ?: return
         db.reminderDao().delete(item)
@@ -553,6 +574,8 @@ class AutologRepository(
                         .put("fuelType", r.fuelType)
                         .put("isTankFull", r.isTankFull)
                         .put("stationName", r.stationName)
+                        .put("stationLat", r.stationLat)
+                        .put("stationLon", r.stationLon)
                         .put("note", r.note)
                         .put("consumptionLPer100Km", r.consumptionLPer100Km)
                         .put("createdAtEpochMs", r.createdAtEpochMs),
@@ -700,6 +723,16 @@ class AutologRepository(
                             fuelType = r.optString("fuelType").ifBlank { null },
                             isTankFull = r.optBoolean("isTankFull", false),
                             stationName = r.optString("stationName").ifBlank { null },
+                            stationLat = if (r.has("stationLat") && !r.isNull("stationLat")) {
+                                r.getDouble("stationLat")
+                            } else {
+                                null
+                            },
+                            stationLon = if (r.has("stationLon") && !r.isNull("stationLon")) {
+                                r.getDouble("stationLon")
+                            } else {
+                                null
+                            },
                             note = r.optString("note").ifBlank { null },
                             consumptionLPer100Km = if (r.has("consumptionLPer100Km") && !r.isNull("consumptionLPer100Km")) {
                                 r.getDouble("consumptionLPer100Km")

@@ -1,11 +1,9 @@
 package ru.autolog.app.ui
 
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -86,13 +84,16 @@ class CloudSyncFailureUiTest {
         composeRule.onNodeWithText("Ещё не сохраняли в Google", substring = true)
             .assertIsDisplayed()
         triggerSyncAndAwaitError(fake, "закончилось место")
-        composeRule.onNodeWithTag("${SettingsTags.GOOGLE_ERROR_DIALOG}_text")
-            .assertTextContains("Освободите место", substring = true)
+        // Dialog may live in a separate window — match copy, not an inner testTag.
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("Освободите место", substring = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
 
         assertEquals(1, fake.uploadCalls)
         val snapshot = runBlocking { appSettings() }
         assertNull(snapshot.lastCloudSyncEpochMs)
-        // Dismiss dialog so status line under chips is visible again
         composeRule.onNodeWithText("ОК").performClick()
         composeRule.onNodeWithText("Ещё не сохраняли в Google", substring = true)
             .assertIsDisplayed()

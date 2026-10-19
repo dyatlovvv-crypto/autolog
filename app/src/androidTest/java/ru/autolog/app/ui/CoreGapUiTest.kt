@@ -108,8 +108,10 @@ class CoreGapUiTest {
         robot.waitTag(DashboardTags.ROOT)
 
         composeRule.onNodeWithTag(DashboardTags.feedService(repairId)).performClick()
-        composeRule.onNodeWithTag(TimelineTags.actionDelete("SERVICE", repairId)).performClick()
-        composeRule.onNodeWithTag(TimelineTags.DELETE_CONFIRM).performClick()
+        composeRule.onNodeWithTag(TimelineTags.actionEdit("SERVICE", repairId)).performClick()
+        robot.waitTag(ServiceTags.SCREEN)
+        composeRule.onNodeWithTag(ServiceTags.DELETE).performClick()
+        composeRule.onNodeWithTag(ServiceTags.DELETE_CONFIRM).performClick()
         composeRule.waitUntil(8_000) {
             composeRule.onAllNodesWithTag(DashboardTags.feedService(repairId))
                 .fetchSemanticsNodes()

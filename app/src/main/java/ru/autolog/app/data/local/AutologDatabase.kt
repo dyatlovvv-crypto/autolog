@@ -29,7 +29,7 @@ import ru.autolog.app.data.local.entity.VehicleEntity
         NoteEntity::class,
         VehicleDocumentEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AutologDatabase : RoomDatabase() {
@@ -60,6 +60,7 @@ abstract class AutologDatabase : RoomDatabase() {
                         AutologMigrations.MIGRATION_3_4,
                         AutologMigrations.MIGRATION_4_5,
                         AutologMigrations.MIGRATION_5_6,
+                        AutologMigrations.MIGRATION_6_7,
                     )
                     // Never wipe user data on schema mismatch. Add an explicit Migration instead.
                     .build()

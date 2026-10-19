@@ -43,51 +43,40 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutorCompletionService
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.cos
-import org.json.JSONArray
 import org.json.JSONObject
+import ru.autolog.app.AutologApp
+import ru.autolog.app.BuildConfig
 import ru.autolog.app.ui.glass.GlassScaffold
 import ru.autolog.app.ui.glass.GlassTopAppBar
 
 object GasMapTags {
     const val SCREEN = "gas_map_screen"
+    const val BACK = "gas_map_back"
     const val PICK_TEST = "gas_map_pick_test"
 }
 
 private const val TAG = "AutologMap"
 
 /**
- * OSM map in WebView (AssetLoader https origin).
- * Overpass runs on Android (avoids WebView CORS) and injects markers into JS.
+ * OSM map in WebView. Stations come from [NearbyFuelStationsStore] (prefetched on refuel screen).
+ * Large JSON is passed via JavascriptInterface (not evaluateJavascript) to avoid WebView crashes.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GasStationMapScreen(
-    onStationPicked: (String) -> Unit,
+    onStationPicked: (name: String, lat: Double, lon: Double) -> Unit,
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val fuelStore = remember { AutologApp.instance.container.fuelStations }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    val io = remember { Executors.newSingleThreadExecutor() }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var bridgeRef by remember { mutableStateOf<MapJsBridge?>(null) }
     var permissionNonce by remember { mutableStateOf(0) }
+    val pickedOnce = remember { AtomicBoolean(false) }
 
-    val underEspresso = remember {
-        try {
-            Class.forName("androidx.test.espresso.Espresso")
-            true
-        } catch (_: ClassNotFoundException) {
-            false
-        }
-    }
+    val showTestPick = BuildConfig.SHOW_MAP_TEST_PICK
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -96,11 +85,12 @@ fun GasStationMapScreen(
         val wv = webViewRef
         val bridge = bridgeRef
         if (wv != null && bridge != null) {
-            centerAndLoadStations(wv, bridge)
+            centerAndLoadStations(wv, bridge, fuelStore)
         }
     }
 
     DisposableEffect(Unit) {
+        fuelStore.prefetchAsync()
         val fine = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -117,9 +107,7 @@ fun GasStationMapScreen(
                 ),
             )
         }
-        onDispose {
-            io.shutdownNow()
-        }
+        onDispose { }
     }
 
     GlassScaffold(
@@ -128,7 +116,10 @@ fun GasStationMapScreen(
             GlassTopAppBar(
                 title = { Text("Заправка на карте") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Text("←") }
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.testTag(GasMapTags.BACK),
+                    ) { Text("←") }
                 },
             )
         },
@@ -159,13 +150,20 @@ fun GasStationMapScreen(
                         settings.displayZoomControls = false
                         settings.userAgentString =
                             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
-                                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Autolog/0.7.3"
+                                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Autolog/0.7.8"
 
                         val bridge = MapJsBridge(
                             webView = this,
                             mainHandler = mainHandler,
-                            io = io,
-                            onStationPicked = onStationPicked,
+                            fuelStore = fuelStore,
+                            onStationPicked = pick@{ name, lat, lon ->
+                                if (!pickedOnce.compareAndSet(false, true)) return@pick
+                                // Let WebView finish the touch/JS frame before tearing the screen down.
+                                mainHandler.post {
+                                    runCatching { onStationPicked(name, lat, lon) }
+                                        .onFailure { Log.e(TAG, "onStationPicked", it) }
+                                }
+                            },
                         )
                         bridgeRef = bridge
                         webViewRef = this
@@ -200,7 +198,9 @@ fun GasStationMapScreen(
                                         "if(window.__autologMap){window.__autologMap.invalidateSize(true);}",
                                         null,
                                     )
-                                    centerAndLoadStations(view, bridge)
+                                    // Show cached stations immediately if prefetch already finished.
+                                    bridge.injectCachedIfAny()
+                                    centerAndLoadStations(view, bridge, fuelStore)
                                 }
                                 view.postDelayed({
                                     view.evaluateJavascript(
@@ -222,9 +222,13 @@ fun GasStationMapScreen(
                     }
                 },
             )
-            if (underEspresso) {
+            if (showTestPick) {
                 Button(
-                    onClick = { onStationPicked("UITest АЗС") },
+                    onClick = {
+                        if (pickedOnce.compareAndSet(false, true)) {
+                            onStationPicked("UITest АЗС", 55.75, 37.62)
+                        }
+                    },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
@@ -241,32 +245,62 @@ fun GasStationMapScreen(
 private class MapJsBridge(
     private val webView: WebView,
     private val mainHandler: Handler,
-    private val io: java.util.concurrent.ExecutorService,
-    private val onStationPicked: (String) -> Unit,
+    private val fuelStore: ru.autolog.app.data.map.NearbyFuelStationsStore,
+    private val onStationPicked: (String, Double, Double) -> Unit,
 ) {
+    @Volatile
+    private var pendingStationsJson: String = """{"elements":[]}"""
+
     @JavascriptInterface
-    fun onPick(name: String) {
-        mainHandler.post { onStationPicked(name) }
+    fun onPick(name: String?, lat: Double, lon: Double) {
+        val safe = name?.trim()?.take(200)?.ifBlank { "АЗС" } ?: "АЗС"
+        if (!lat.isFinite() || !lon.isFinite()) return
+        mainHandler.post { onStationPicked(safe, lat, lon) }
     }
+
+    /** Safe path for large payloads — JS pulls JSON instead of embedding it in evaluateJavascript. */
+    @JavascriptInterface
+    fun getStationsJson(): String = pendingStationsJson
 
     @JavascriptInterface
     fun requestStations(lat: Double, lon: Double) {
         fetchStations(lat, lon)
     }
 
+    fun injectCachedIfAny() {
+        val cached = fuelStore.cachedOrNull() ?: return
+        pendingStationsJson = cached.json
+        webView.evaluateJavascript(
+            "window.showStations && window.showStations(Autolog.getStationsJson());",
+            null,
+        )
+    }
+
     fun fetchStations(lat: Double, lon: Double) {
-        io.execute {
-            val json = queryOverpass(lat, lon)
+        fuelStore.execute {
+            val json = runCatching { fuelStore.getStations(lat, lon) }
+                .onFailure {
+                    if (it is InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        Log.d(TAG, "fetchStations interrupted")
+                    } else {
+                        Log.w(TAG, "fetchStations: ${it.message}")
+                    }
+                }
+                .getOrNull()
+            if (Thread.currentThread().isInterrupted) return@execute
             mainHandler.post {
+                if (!webView.isAttachedToWindow) return@post
                 if (json == null) {
                     webView.evaluateJavascript(
-                        "window.setStatus && window.setStatus('Не удалось загрузить АЗС. Введите вручную.', true);",
+                        "window.setStatus && window.setStatus(" +
+                            "'Не удалось загрузить АЗС. Введите вручную.', true);",
                         null,
                     )
                 } else {
-                    val escaped = JSONObject.quote(json)
+                    pendingStationsJson = json
                     webView.evaluateJavascript(
-                        "window.showStations && window.showStations($escaped);",
+                        "window.showStations && window.showStations(Autolog.getStationsJson());",
                         null,
                     )
                 }
@@ -276,7 +310,11 @@ private class MapJsBridge(
 }
 
 @SuppressLint("MissingPermission")
-private fun centerAndLoadStations(webView: WebView, bridge: MapJsBridge) {
+private fun centerAndLoadStations(
+    webView: WebView,
+    bridge: MapJsBridge,
+    fuelStore: ru.autolog.app.data.map.NearbyFuelStationsStore,
+) {
     val ctx = webView.context
     val fine = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) ==
         PackageManager.PERMISSION_GRANTED
@@ -288,6 +326,14 @@ private fun centerAndLoadStations(webView: WebView, bridge: MapJsBridge) {
             "window.showHere && window.showHere($lat, $lon, ${JSONObject.quote(msg)});",
             null,
         )
+        // Instant paint from cache, then refresh if needed.
+        fuelStore.cachedOrNull()?.let { c ->
+            if (
+                distanceOk(c.lat, c.lon, lat, lon)
+            ) {
+                bridge.injectCachedIfAny()
+            }
+        }
         bridge.fetchStations(lat, lon)
     }
 
@@ -356,173 +402,8 @@ private fun centerAndLoadStations(webView: WebView, bridge: MapJsBridge) {
     }, 12_000L)
 }
 
-private const val HTTP_UA = "Autolog/0.7.3 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
-
-/** Overpass race + Nominatim/Photon fallbacks. Returns Overpass-shaped JSON for JS. */
-private fun queryOverpass(lat: Double, lon: Double): String? {
-    val aroundM = 8_000
-    val q = """
-        [out:json][timeout:20];
-        (
-          nwr["amenity"="fuel"](around:$aroundM,$lat,$lon);
-          nwr["highway"="services"]["fuel"="yes"](around:$aroundM,$lat,$lon);
-        );
-        out center tags;
-    """.trimIndent()
-    val endpoints = listOf(
-        "https://overpass.openstreetmap.ru/cgi/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://overpass.osm.ch/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-    )
-    val pool = Executors.newFixedThreadPool(endpoints.size.coerceAtMost(4))
-    try {
-        val ecs = ExecutorCompletionService<String?>(pool)
-        endpoints.forEach { ep ->
-            ecs.submit(Callable { postOverpass(ep, q) })
-        }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(22)
-        for (i in endpoints.indices) {
-            val waitNs = (deadline - System.nanoTime()).coerceAtLeast(0)
-            val fut = ecs.poll(waitNs, TimeUnit.NANOSECONDS) ?: break
-            val body = runCatching { fut.get() }.getOrNull()
-            if (!body.isNullOrBlank() && hasFuelElements(body)) {
-                Log.d(TAG, "overpass ok, bytes=${body.length}")
-                return body
-            }
-        }
-    } finally {
-        pool.shutdownNow()
-    }
-    Log.w(TAG, "overpass all failed, trying fallbacks")
-    return queryNominatimFuel(lat, lon) ?: queryPhotonFuel(lat, lon)
-}
-
-private fun hasFuelElements(body: String): Boolean {
-    return runCatching {
-        JSONObject(body).optJSONArray("elements")?.length()?.let { it > 0 } == true
-    }.getOrDefault(false)
-}
-
-private fun postOverpass(endpoint: String, query: String): String? {
-    return try {
-        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 10_000
-            readTimeout = 20_000
-            doOutput = true
-            setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-            setRequestProperty("User-Agent", HTTP_UA)
-            setRequestProperty("Accept", "application/json")
-        }
-        conn.outputStream.bufferedWriter().use {
-            it.write("data=" + java.net.URLEncoder.encode(query, "UTF-8"))
-        }
-        val code = conn.responseCode
-        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader()?.use { it.readText() }
-        conn.disconnect()
-        if (code in 200..299 && !body.isNullOrBlank()) {
-            Log.d(TAG, "overpass $endpoint ok")
-            body
-        } else {
-            Log.w(TAG, "overpass $endpoint -> $code")
-            null
-        }
-    } catch (t: Throwable) {
-        Log.w(TAG, "overpass fail $endpoint: ${t.message}")
-        null
-    }
-}
-
-private fun queryNominatimFuel(lat: Double, lon: Double): String? {
-    val delta = 0.08
-    val south = lat - delta
-    val north = lat + delta
-    val west = lon - delta / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
-    val east = lon + delta / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
-    val viewbox = "$west,$north,$east,$south"
-    val q = java.net.URLEncoder.encode("[amenity=fuel]", "UTF-8")
-    val vb = java.net.URLEncoder.encode(viewbox, "UTF-8")
-    val url =
-        "https://nominatim.openstreetmap.org/search?format=jsonv2&q=$q" +
-            "&limit=50&bounded=1&viewbox=$vb"
-    return try {
-        val raw = httpGet(url) ?: return null
-        val arr = JSONArray(raw)
-        val elements = JSONArray()
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val el = JSONObject()
-            el.put("type", "node")
-            el.put("lat", o.optDouble("lat"))
-            el.put("lon", o.optDouble("lon"))
-            val tags = JSONObject()
-            val name = o.optString("name").ifBlank {
-                o.optString("display_name").substringBefore(',').trim()
-            }
-            if (name.isNotBlank()) tags.put("name", name)
-            el.put("tags", tags)
-            elements.put(el)
-        }
-        if (elements.length() == 0) return null
-        Log.d(TAG, "nominatim fuel=${elements.length()}")
-        JSONObject().put("elements", elements).toString()
-    } catch (t: Throwable) {
-        Log.w(TAG, "nominatim fail: ${t.message}")
-        null
-    }
-}
-
-private fun queryPhotonFuel(lat: Double, lon: Double): String? {
-    val url =
-        "https://photon.komoot.io/api/?q=fuel&lat=$lat&lon=$lon&limit=50&osm_tag=amenity:fuel"
-    return try {
-        val raw = httpGet(url) ?: return null
-        val features = JSONObject(raw).optJSONArray("features") ?: return null
-        val elements = JSONArray()
-        for (i in 0 until features.length()) {
-            val f = features.optJSONObject(i) ?: continue
-            val coords = f.optJSONObject("geometry")?.optJSONArray("coordinates") ?: continue
-            if (coords.length() < 2) continue
-            val props = f.optJSONObject("properties")
-            val el = JSONObject()
-            el.put("type", "node")
-            el.put("lon", coords.optDouble(0))
-            el.put("lat", coords.optDouble(1))
-            val tags = JSONObject()
-            val name = props?.optString("name")?.ifBlank { null }
-                ?: props?.optString("street")?.ifBlank { null }
-                ?: "АЗС"
-            tags.put("name", name)
-            props?.optString("brand")?.takeIf { it.isNotBlank() }?.let { tags.put("brand", it) }
-            el.put("tags", tags)
-            elements.put(el)
-        }
-        if (elements.length() == 0) return null
-        Log.d(TAG, "photon fuel=${elements.length()}")
-        JSONObject().put("elements", elements).toString()
-    } catch (t: Throwable) {
-        Log.w(TAG, "photon fail: ${t.message}")
-        null
-    }
-}
-
-private fun httpGet(url: String): String? {
-    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-        requestMethod = "GET"
-        connectTimeout = 10_000
-        readTimeout = 14_000
-        setRequestProperty("User-Agent", HTTP_UA)
-        setRequestProperty("Accept", "application/json")
-    }
-    return try {
-        val code = conn.responseCode
-        val body = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader()?.use { it.readText() }
-        if (code in 200..299 && !body.isNullOrBlank()) body else null
-    } finally {
-        conn.disconnect()
-    }
+private fun distanceOk(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Boolean {
+    val out = FloatArray(1)
+    Location.distanceBetween(lat1, lon1, lat2, lon2, out)
+    return out[0] < 2_500f
 }

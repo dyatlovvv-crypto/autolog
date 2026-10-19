@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import ru.autolog.app.AutologApp
 import ru.autolog.app.data.draft.FormDraftStore
+import ru.autolog.app.data.map.StationMapSnapshots
 import ru.autolog.app.data.repository.AutologRepository
 import ru.autolog.app.domain.FuelType
 
@@ -25,13 +27,20 @@ data class AddRefuelUiState(
     val price: String = "",
     val isTankFull: Boolean = true,
     val station: String = "",
+    val stationLat: Double? = null,
+    val stationLon: Double? = null,
     val fuelType: FuelType = FuelType.AI_95,
     val saving: Boolean = false,
     val error: String? = null,
     val saved: Boolean = false,
     val loaded: Boolean = false,
     val showLowOdoConfirm: Boolean = false,
-)
+) {
+    val hasStationMap: Boolean
+        get() = (stationLat != null && stationLon != null &&
+            stationLat.isFinite() && stationLon.isFinite()) ||
+            station.isNotBlank()
+}
 
 class AddRefuelViewModel(
     private val repository: AutologRepository,
@@ -57,6 +66,8 @@ class AddRefuelViewModel(
     private val litersFlow = savedStateHandle.getStateFlow(KEY_LITERS, "")
     private val priceFlow = savedStateHandle.getStateFlow(KEY_PRICE, "")
     private val stationFlow = savedStateHandle.getStateFlow(KEY_STATION, "")
+    private val stationLatFlow = savedStateHandle.getStateFlow(KEY_STATION_LAT, "")
+    private val stationLonFlow = savedStateHandle.getStateFlow(KEY_STATION_LON, "")
     private val tankFullFlow = savedStateHandle.getStateFlow(KEY_TANK_FULL, true)
     private val fuelTypeFlow = savedStateHandle.getStateFlow(KEY_FUEL_TYPE, FuelType.AI_95.name)
 
@@ -69,6 +80,8 @@ class AddRefuelViewModel(
         val liters: String,
         val price: String,
         val station: String,
+        val stationLat: String,
+        val stationLon: String,
         val isTankFull: Boolean,
         val fuelType: String,
     )
@@ -77,16 +90,19 @@ class AddRefuelViewModel(
         combine(odometerFlow, litersFlow, priceFlow, stationFlow) { odo, liters, price, station ->
             arrayOf(odo, liters, price, station)
         },
-        tankFullFlow,
-        fuelTypeFlow,
-    ) { texts, tankFull, fuelName ->
+        combine(stationLatFlow, stationLonFlow, tankFullFlow, fuelTypeFlow) { lat, lon, tank, fuel ->
+            arrayOf(lat, lon, tank.toString(), fuel)
+        },
+    ) { texts, extras ->
         Fields(
             odometer = texts[0],
             liters = texts[1],
             price = texts[2],
             station = texts[3],
-            isTankFull = tankFull,
-            fuelType = fuelName,
+            stationLat = extras[0],
+            stationLon = extras[1],
+            isTankFull = extras[2].toBooleanStrictOrNull() ?: true,
+            fuelType = extras[3],
         )
     }
 
@@ -101,6 +117,8 @@ class AddRefuelViewModel(
             price = fields.price,
             isTankFull = fields.isTankFull,
             station = fields.station,
+            stationLat = fields.stationLat.toDoubleOrNull(),
+            stationLon = fields.stationLon.toDoubleOrNull(),
             fuelType = FuelType.fromStorage(fields.fuelType) ?: FuelType.AI_95,
             saving = meta.saving,
             error = meta.error,
@@ -152,6 +170,8 @@ class AddRefuelViewModel(
                     if (r.pricePerLiter == 0.0) "" else r.pricePerLiter.toString()
                 savedStateHandle[KEY_TANK_FULL] = r.isTankFull
                 savedStateHandle[KEY_STATION] = r.stationName.orEmpty()
+                savedStateHandle[KEY_STATION_LAT] = r.stationLat?.toString().orEmpty()
+                savedStateHandle[KEY_STATION_LON] = r.stationLon?.toString().orEmpty()
                 savedStateHandle[KEY_FUEL_TYPE] =
                     (FuelType.fromStorage(r.fuelType) ?: FuelType.AI_95).name
                 savedStateHandle[KEY_EDIT_LOADED] = true
@@ -160,6 +180,27 @@ class AddRefuelViewModel(
                         editId = r.id,
                         vehicleId = r.vehicleId,
                         loaded = true,
+                    )
+                }
+                // Old refuels: name without coords → geocode once and keep snapshot.
+                // Skip UITest* names so device UI tests never wait on Nominatim.
+                if (
+                    (r.stationLat == null || r.stationLon == null) &&
+                    !r.stationName.isNullOrBlank() &&
+                    !r.stationName.startsWith("UITest")
+                ) {
+                    val geo = StationMapSnapshots.geocode(r.stationName)
+                    if (geo != null) {
+                        repository.updateRefuelStationCoords(r.id, geo.lat, geo.lon)
+                        savedStateHandle[KEY_STATION_LAT] = geo.lat.toString()
+                        savedStateHandle[KEY_STATION_LON] = geo.lon.toString()
+                        StationMapSnapshots.prefetchAsync(AutologApp.instance, geo.lat, geo.lon)
+                    }
+                } else if (r.stationLat != null && r.stationLon != null) {
+                    StationMapSnapshots.prefetchAsync(
+                        AutologApp.instance,
+                        r.stationLat,
+                        r.stationLon,
                     )
                 }
             }
@@ -234,6 +275,18 @@ class AddRefuelViewModel(
 
     fun onStation(v: String) {
         savedStateHandle[KEY_STATION] = v
+        // Manual edit invalidates map coordinates.
+        savedStateHandle[KEY_STATION_LAT] = ""
+        savedStateHandle[KEY_STATION_LON] = ""
+        persistDraft()
+    }
+
+    fun onStationPicked(name: String, lat: Double, lon: Double) {
+        savedStateHandle[KEY_STATION] = name
+        savedStateHandle[KEY_STATION_LAT] = lat.toString()
+        savedStateHandle[KEY_STATION_LON] = lon.toString()
+        // Warm disk snapshot once — later opens only show the PNG.
+        StationMapSnapshots.prefetchAsync(AutologApp.instance, lat, lon)
         persistDraft()
     }
 
@@ -297,6 +350,8 @@ class AddRefuelViewModel(
                     isTankFull = s.isTankFull,
                     stationName = s.station,
                     fuelType = s.fuelType.name,
+                    stationLat = s.stationLat,
+                    stationLon = s.stationLon,
                 )
             } else {
                 repository.addRefuelling(
@@ -307,6 +362,8 @@ class AddRefuelViewModel(
                     isTankFull = s.isTankFull,
                     stationName = s.station,
                     fuelType = s.fuelType.name,
+                    stationLat = s.stationLat,
+                    stationLon = s.stationLon,
                 )
             }
             result.onSuccess {
@@ -331,6 +388,8 @@ class AddRefuelViewModel(
         private const val KEY_LITERS = "liters"
         private const val KEY_PRICE = "price"
         private const val KEY_STATION = "station"
+        private const val KEY_STATION_LAT = "stationLat"
+        private const val KEY_STATION_LON = "stationLon"
         private const val KEY_TANK_FULL = "isTankFull"
         private const val KEY_TANK_FULL_SET = "isTankFull_set"
         private const val KEY_FUEL_TYPE = "fuelType"

@@ -145,7 +145,9 @@ object AppUpdateChecker {
                 tagName = tag.ifBlank { versionName },
                 apkUrl = urlApk,
                 apkName = apkName,
-                notes = sanitizeReleaseNotes(json.optString("body")),
+                notes = sanitizeReleaseNotes(
+                    if (json.isNull("body")) null else json.optString("body"),
+                ),
             )
         } finally {
             conn.disconnect()
@@ -154,7 +156,8 @@ object AppUpdateChecker {
 
     /** Trims GitHub release body for in-app display (plain business notes). */
     fun sanitizeReleaseNotes(raw: String?): String {
-        if (raw.isNullOrBlank()) return ""
+        // org.json optString() turns JSON null into the literal "null".
+        if (raw.isNullOrBlank() || raw.equals("null", ignoreCase = true)) return ""
         return raw
             .replace("\r\n", "\n")
             .replace("\r", "\n")
@@ -165,6 +168,7 @@ object AppUpdateChecker {
             .dropLastWhile { it.isBlank() }
             .joinToString("\n")
             .trim()
+            .let { if (it.equals("null", ignoreCase = true)) "" else it }
     }
 
     private fun normalizeVersion(raw: String?): String? {

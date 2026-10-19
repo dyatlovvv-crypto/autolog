@@ -26,5 +26,7 @@ class AppUpdateCheckerTest {
         )
         assertEquals("", AppUpdateChecker.sanitizeReleaseNotes("   "))
         assertEquals("", AppUpdateChecker.sanitizeReleaseNotes(null))
+        assertEquals("", AppUpdateChecker.sanitizeReleaseNotes("null"))
+        assertEquals("", AppUpdateChecker.sanitizeReleaseNotes("NULL"))
     }
 }

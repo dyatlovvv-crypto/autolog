@@ -3,6 +3,7 @@ package ru.autolog.app.di
 import android.content.Context
 import ru.autolog.app.data.draft.FormDraftStore
 import ru.autolog.app.data.local.AutologDatabase
+import ru.autolog.app.data.map.NearbyFuelStationsStore
 import ru.autolog.app.data.repository.AutologRepository
 import ru.autolog.app.data.settings.UserSettingsStore
 import ru.autolog.app.data.sync.CloudBackupGateway
@@ -16,6 +17,7 @@ class AppContainer(context: Context) {
     )
     val formDraftStore: FormDraftStore = FormDraftStore(context)
     val settingsStore: UserSettingsStore = UserSettingsStore(context)
+    val fuelStations: NearbyFuelStationsStore = NearbyFuelStationsStore(context)
 
     /** Replaceable in instrumented tests (quota / network fakes). */
     @Volatile

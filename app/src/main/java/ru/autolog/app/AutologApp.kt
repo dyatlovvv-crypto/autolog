@@ -24,6 +24,8 @@ class AutologApp : Application() {
         container = AppContainer(this)
         ReminderNotifications.ensureChannel(this)
         ReminderCheckWorker.enqueue(this)
+        // Warm nearby АЗС so the map opens with markers ready.
+        container.fuelStations.prefetchAsync()
         appScope.launch {
             val settings = container.settingsStore.settings.first()
             if (!settings.googleLinked || settings.syncPeriod == SyncPeriod.OFF) {

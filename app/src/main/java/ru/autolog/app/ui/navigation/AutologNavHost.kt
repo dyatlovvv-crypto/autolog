@@ -210,11 +210,18 @@ fun AutologNavHost() {
         }
         composable(Routes.GAS_MAP) {
             GasStationMapScreen(
-                onStationPicked = { name ->
-                    navController.previousBackStackEntry
-                        ?.savedStateHandle
-                        ?.set("picked_station", name)
-                    navController.popBackStack()
+                onStationPicked = { name, lat, lon ->
+                    navController.previousBackStackEntry?.savedStateHandle?.apply {
+                        set("picked_station", name)
+                        set("picked_station_lat", lat)
+                        set("picked_station_lon", lon)
+                    }
+                    // Pop on next frame: avoids WebView native crash while handling the tap.
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        if (navController.currentDestination?.route == Routes.GAS_MAP) {
+                            navController.popBackStack()
+                        }
+                    }
                 },
                 onBack = { navController.popBackStack() },
             )

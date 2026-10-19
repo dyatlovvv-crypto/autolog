@@ -27,21 +27,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,17 +48,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.autolog.app.ui.map.StationMiniMap
 import ru.autolog.app.ui.theme.AutologElevation
 import ru.autolog.app.ui.theme.AutologRadii
 import ru.autolog.app.ui.theme.AutologSpace
 
 object TimelineTags {
     fun item(kind: String, id: Long) = "timeline_item_${kind}_$id"
-    fun actionDelete(kind: String, id: Long) = "timeline_action_delete_${kind}_$id"
     fun actionEdit(kind: String, id: Long) = "timeline_action_edit_${kind}_$id"
     fun actionView(kind: String, id: Long) = "timeline_action_view_${kind}_$id"
     fun roadKm(kind: String, id: Long) = "timeline_road_km_${kind}_$id"
-    const val DELETE_CONFIRM = "timeline_delete_confirm"
 }
 
 private val RoadAsphalt = Color(0xFF4A525A)
@@ -162,7 +155,6 @@ fun ExpandableTimelineItem(
     onToggle: () -> Unit,
     onView: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     dateText: String? = null,
     kmText: String? = null,
@@ -171,10 +163,13 @@ fun ExpandableTimelineItem(
     roadKmLabel: String? = null,
     roadConsumptionLabel: String? = null,
     roadConsumptionUnit: String? = null,
+    stationLat: Double? = null,
+    stationLon: Double? = null,
+    stationLabel: String? = null,
+    showStationMap: Boolean = false,
 ) {
     val tint = kind.tint()
     val icon = kind.icon()
-    var confirmDelete by remember { mutableStateOf(false) }
     val roadAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0.85f,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -274,6 +269,24 @@ fun ExpandableTimelineItem(
                                 )
                             }
                         }
+                        // Mini-map only when row is expanded (not on collapsed feed).
+                        if (
+                            showStationMap &&
+                            stationLat != null &&
+                            stationLon != null &&
+                            stationLat.isFinite() &&
+                            stationLon.isFinite()
+                        ) {
+                            Spacer(modifier = Modifier.height(AutologSpace.sm))
+                            StationMiniMap(
+                                lat = stationLat,
+                                lon = stationLon,
+                                label = stationLabel,
+                                refuelId = id,
+                                height = 120.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                         Spacer(modifier = Modifier.height(AutologSpace.sm))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -296,17 +309,6 @@ fun ExpandableTimelineItem(
                                 AccentIcon(
                                     imageVector = Icons.Outlined.Edit,
                                     contentDescription = "Редактировать",
-                                )
-                            }
-                            Spacer(modifier = Modifier.weight(1f))
-                            IconButton(
-                                onClick = { confirmDelete = true },
-                                modifier = Modifier.testTag(TimelineTags.actionDelete(kindKey, id)),
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Delete,
-                                    contentDescription = "Удалить",
-                                    tint = MaterialTheme.colorScheme.error,
                                 )
                             }
                         }
@@ -348,25 +350,6 @@ fun ExpandableTimelineItem(
         }
     }
 
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("Удалить запись?") },
-            text = { Text("Действие нельзя отменить.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDelete = false
-                        onDelete()
-                    },
-                    modifier = Modifier.testTag(TimelineTags.DELETE_CONFIRM),
-                ) { Text("Удалить") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) { Text("Отмена") }
-            },
-        )
-    }
 }
 
 @Composable
