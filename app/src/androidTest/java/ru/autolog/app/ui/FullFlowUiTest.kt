@@ -99,23 +99,51 @@ class FullFlowUiTest {
         composeRule.onNodeWithTag(AddReminderTags.CHANGED_OK).performClick()
         waitTag(DashboardTags.ROOT)
         composeRule.onNodeWithTag(DashboardTags.OIL_REMINDER).assertIsDisplayed()
+        composeRule.onNodeWithTag(DashboardTags.MAINTENANCE_SLOT_1).assertIsDisplayed()
         composeRule.onNodeWithText(reminderTitle, substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag(DashboardTags.OIL_REMINDER).performClick()
+        waitTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.SCREEN)
+        composeRule.onNodeWithTag(
+            ru.autolog.app.ui.maintenance.MaintenanceListTags.row(
+                ru.autolog.app.domain.MaintenanceKind.OIL,
+            ),
+        ).performClick()
         waitTag(AddReminderTags.SCREEN)
         composeRule.onNodeWithTag(AddReminderTags.TITLE).performTextClearance()
         composeRule.onNodeWithTag(AddReminderTags.TITLE).performTextInput("$reminderTitle edit")
         composeRule.onNodeWithTag(AddReminderTags.SAVE).performClick()
         waitTag(AddReminderTags.CHANGED_OK)
         composeRule.onNodeWithTag(AddReminderTags.CHANGED_OK).performClick()
+        // back from list to dashboard if still on list
+        composeRule.waitForIdle()
+        if (composeRule.onAllNodesWithTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.SCREEN)
+                .fetchSemanticsNodes().isNotEmpty()
+        ) {
+            composeRule.onNodeWithTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.BACK)
+                .performClick()
+        }
         waitTag(DashboardTags.ROOT)
         composeRule.onNodeWithText("$reminderTitle edit", substring = true).assertIsDisplayed()
 
-        // Delete reminder from edit screen
+        // Delete reminder from edit screen via list
         composeRule.onNodeWithTag(DashboardTags.OIL_REMINDER).performClick()
+        waitTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.SCREEN)
+        composeRule.onNodeWithTag(
+            ru.autolog.app.ui.maintenance.MaintenanceListTags.row(
+                ru.autolog.app.domain.MaintenanceKind.OIL,
+            ),
+        ).performClick()
         waitTag(AddReminderTags.SCREEN)
         composeRule.onNodeWithTag(AddReminderTags.DELETE).performClick()
         composeRule.onNodeWithTag("reminder_delete_confirm").performClick()
+        composeRule.waitForIdle()
+        if (composeRule.onAllNodesWithTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.SCREEN)
+                .fetchSemanticsNodes().isNotEmpty()
+        ) {
+            composeRule.onNodeWithTag(ru.autolog.app.ui.maintenance.MaintenanceListTags.BACK)
+                .performClick()
+        }
         waitTag(DashboardTags.ROOT)
 
         // Wash (мойка) via service hub + edit

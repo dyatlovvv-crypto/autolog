@@ -3,6 +3,7 @@ package ru.autolog.app.data.settings
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -64,6 +65,8 @@ data class UserSettings(
     val googlePhotoUrl: String? = null,
     val syncPeriod: SyncPeriod = SyncPeriod.OFF,
     val lastCloudSyncEpochMs: Long? = null,
+    /** Prefs say linked, but Google Sign-In session is missing (common after reinstall). */
+    val googleSessionStale: Boolean = false,
     val docsViewMode: DocsViewMode = DocsViewMode.LIST,
 )
 
@@ -91,6 +94,7 @@ class UserSettingsStore(context: Context) {
                 runCatching { SyncPeriod.valueOf(it) }.getOrNull()
             } ?: SyncPeriod.OFF,
             lastCloudSyncEpochMs = prefs[KEY_LAST_SYNC],
+            googleSessionStale = prefs[KEY_GOOGLE_SESSION_STALE] == true,
             docsViewMode = prefs[KEY_DOCS_VIEW]?.let {
                 runCatching { DocsViewMode.valueOf(it) }.getOrNull()
             } ?: DocsViewMode.LIST,
@@ -130,6 +134,7 @@ class UserSettingsStore(context: Context) {
             else prefs[KEY_GOOGLE_NAME] = displayName
             if (photoUrl.isNullOrBlank()) prefs.remove(KEY_GOOGLE_PHOTO)
             else prefs[KEY_GOOGLE_PHOTO] = photoUrl
+            prefs[KEY_GOOGLE_SESSION_STALE] = false
         }
     }
 
@@ -138,7 +143,15 @@ class UserSettingsStore(context: Context) {
             prefs.remove(KEY_GOOGLE_EMAIL)
             prefs.remove(KEY_GOOGLE_NAME)
             prefs.remove(KEY_GOOGLE_PHOTO)
+            prefs.remove(KEY_GOOGLE_SESSION_STALE)
             prefs[KEY_SYNC_PERIOD] = SyncPeriod.OFF.name
+        }
+    }
+
+    suspend fun setGoogleSessionStale(stale: Boolean) {
+        dataStore.edit { prefs ->
+            if (stale) prefs[KEY_GOOGLE_SESSION_STALE] = true
+            else prefs.remove(KEY_GOOGLE_SESSION_STALE)
         }
     }
 
@@ -167,6 +180,7 @@ class UserSettingsStore(context: Context) {
         val KEY_GOOGLE_PHOTO = stringPreferencesKey("google_photo_url")
         val KEY_SYNC_PERIOD = stringPreferencesKey("sync_period")
         val KEY_LAST_SYNC = longPreferencesKey("last_cloud_sync_epoch_ms")
+        val KEY_GOOGLE_SESSION_STALE = booleanPreferencesKey("google_session_stale")
         val KEY_DOCS_VIEW = stringPreferencesKey("docs_view_mode")
     }
 }

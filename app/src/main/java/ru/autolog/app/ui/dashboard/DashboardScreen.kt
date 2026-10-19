@@ -66,6 +66,7 @@ import ru.autolog.app.data.repository.TimelineEntry
 import ru.autolog.app.data.settings.ConsumptionUnit
 import ru.autolog.app.data.settings.UserSettings
 import ru.autolog.app.domain.FuelType
+import ru.autolog.app.domain.MaintenanceCatalog
 import ru.autolog.app.domain.ServiceChecklistCodec
 import ru.autolog.app.domain.ServiceKind
 import ru.autolog.app.ui.AutologViewModelFactory
@@ -93,6 +94,8 @@ object DashboardTags {
     const val AVG_CONSUMPTION = "stat_avg_consumption"
     const val LAST_CONSUMPTION = "stat_last_consumption"
     const val OIL_REMINDER = "stat_oil_reminder"
+    const val MAINTENANCE_SLOT_0 = "stat_maintenance_0"
+    const val MAINTENANCE_SLOT_1 = "stat_maintenance_1"
     const val ADD_REFUEL = "dashboard_add_refuel"
     const val ADD_REMINDER = "dashboard_add_reminder"
     const val ADD_SERVICE = "dashboard_add_service"
@@ -126,6 +129,7 @@ fun DashboardScreen(
     onOpenSettings: () -> Unit,
     onOpenRefuel: (Long) -> Unit,
     onOpenReminder: (Long) -> Unit,
+    onOpenMaintenance: () -> Unit,
     onOpenExpense: (Long) -> Unit,
     onOpenService: (Long) -> Unit,
     onEditService: (Long) -> Unit = onOpenService,
@@ -253,8 +257,8 @@ fun DashboardScreen(
             else -> {
                 val dash = state.dashboard as? DashboardSnapshot.Data
                 val timeline = dash?.timeline.orEmpty()
-                val oilReminder = remember(dash?.activeReminders) {
-                    primaryOilReminder(dash?.activeReminders.orEmpty())
+                val maintenanceSlots = remember(dash?.activeReminders) {
+                    MaintenanceCatalog.dashboardSlots(dash?.activeReminders.orEmpty(), limit = 2)
                 }
                 val grouped = remember(timeline) {
                     timeline.mapIndexed { index, entry -> index to entry }
@@ -315,25 +319,33 @@ fun DashboardScreen(
                                 },
                                 modifier = Modifier.weight(1f),
                             )
-                            StatCard(
-                                title = oilReminder?.title?.takeIf { it.isNotBlank() } ?: "Замена масла",
-                                value = oilReminder?.remainingKm?.toString() ?: "нет данных",
-                                unit = when {
-                                    oilReminder == null -> "добавьте напоминание"
-                                    oilReminder.remainingDays != null ->
-                                        "км · ${oilReminder.remainingDays} дн."
-                                    else -> "км до замены"
-                                },
-                                cardModifier = Modifier.weight(1f),
-                                testTag = DashboardTags.OIL_REMINDER,
-                                onClick = {
-                                    if (oilReminder != null) {
-                                        onOpenReminder(oilReminder.id)
-                                    } else {
-                                        onAddReminder()
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(AutologSpace.sm),
+                            ) {
+                                maintenanceSlots.forEachIndexed { index, slot ->
+                                    val reminder = slot.reminder
+                                    val tag = when (index) {
+                                        0 -> DashboardTags.OIL_REMINDER
+                                        1 -> DashboardTags.MAINTENANCE_SLOT_1
+                                        else -> DashboardTags.MAINTENANCE_SLOT_0
                                     }
-                                },
-                            )
+                                    StatCard(
+                                        title = reminder?.title?.takeIf { it.isNotBlank() }
+                                            ?: slot.kind.title,
+                                        value = reminder?.remainingKm?.toString() ?: "нет данных",
+                                        unit = when {
+                                            reminder == null -> "не задано"
+                                            reminder.remainingDays != null ->
+                                                "км · ${reminder.remainingDays} дн."
+                                            else -> "км до замены"
+                                        },
+                                        cardModifier = Modifier.fillMaxWidth(),
+                                        testTag = tag,
+                                        onClick = onOpenMaintenance,
+                                    )
+                                }
+                            }
                         }
                     }
                     item(key = "feed_title") {
@@ -733,13 +745,6 @@ private fun MonthLabel(text: String) {
     }
 }
 
-private fun primaryOilReminder(
-    reminders: List<ReminderEntity>,
-): ReminderEntity? {
-    if (reminders.isEmpty()) return null
-    return reminders.firstOrNull { it.title.contains("масл", ignoreCase = true) }
-        ?: reminders.minByOrNull { it.remainingKm ?: Int.MAX_VALUE }
-}
 
 private data class TimelinePresentation(
     val kind: ActivityKind,

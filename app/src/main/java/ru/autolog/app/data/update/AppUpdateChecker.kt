@@ -21,6 +21,8 @@ object AppUpdateChecker {
         val tagName: String,
         val apkUrl: String,
         val apkName: String,
+        /** Business “what’s new” from GitHub release body; empty if none. */
+        val notes: String = "",
     )
 
     sealed class CheckResult {
@@ -143,10 +145,26 @@ object AppUpdateChecker {
                 tagName = tag.ifBlank { versionName },
                 apkUrl = urlApk,
                 apkName = apkName,
+                notes = sanitizeReleaseNotes(json.optString("body")),
             )
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** Trims GitHub release body for in-app display (plain business notes). */
+    fun sanitizeReleaseNotes(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        return raw
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .trim()
+            .lines()
+            .map { it.trimEnd() }
+            .dropWhile { it.isBlank() }
+            .dropLastWhile { it.isBlank() }
+            .joinToString("\n")
+            .trim()
     }
 
     private fun normalizeVersion(raw: String?): String? {

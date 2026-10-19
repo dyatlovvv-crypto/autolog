@@ -26,18 +26,40 @@ class AutologApp : Application() {
         ReminderCheckWorker.enqueue(this)
         appScope.launch {
             val settings = container.settingsStore.settings.first()
-            if (settings.googleLinked) {
-                // Refresh profile photo/name from Play Services if still signed in
-                container.googleDrive.accountInfo()?.let { info ->
-                    container.settingsStore.setGoogleAccount(
-                        info.email,
-                        info.displayName,
-                        info.photoUrl,
-                    )
-                }
-                CloudSyncWorker.enqueue(this@AutologApp, settings.syncPeriod)
-            } else {
+            if (!settings.googleLinked || settings.syncPeriod == SyncPeriod.OFF) {
                 CloudSyncWorker.enqueue(this@AutologApp, SyncPeriod.OFF)
+                return@launch
+            }
+            val account = container.googleDrive.lastSignedInAccount()
+            if (account == null) {
+                container.settingsStore.setGoogleSessionStale(true)
+                // Keep period prefs; do not cancel schedule — user can re-auth and sync.
+                CloudSyncWorker.enqueue(
+                    this@AutologApp,
+                    settings.syncPeriod,
+                    replaceSchedule = false,
+                )
+                return@launch
+            }
+            container.googleDrive.accountInfo(account)?.let { info ->
+                container.settingsStore.setGoogleAccount(
+                    info.email,
+                    info.displayName,
+                    info.photoUrl,
+                )
+            }
+            // KEEP: opening the app must not reset the daily timer to +24h.
+            CloudSyncWorker.enqueue(
+                this@AutologApp,
+                settings.syncPeriod,
+                replaceSchedule = false,
+            )
+            val periodMs = CloudSyncWorker.periodMillis(settings.syncPeriod)
+            val last = settings.lastCloudSyncEpochMs
+            val overdue = periodMs != null &&
+                (last == null || System.currentTimeMillis() - last >= periodMs)
+            if (overdue) {
+                CloudSyncWorker.enqueueOnce(this@AutologApp)
             }
         }
     }

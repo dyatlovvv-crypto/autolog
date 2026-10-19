@@ -66,10 +66,11 @@ fun AddReminderScreen(
     onBack: () -> Unit,
     onDeleted: (() -> Unit)? = null,
     editReminderId: Long? = null,
+    initialKind: ru.autolog.app.domain.MaintenanceKind? = null,
 ) {
     val viewModel: AddReminderViewModel = viewModel(
-        key = "reminder-${editReminderId ?: "new"}",
-        factory = AddReminderVmFactory(editReminderId),
+        key = "reminder-${editReminderId ?: "new"}-${initialKind?.name ?: "plain"}",
+        factory = AddReminderVmFactory(editReminderId, initialKind),
     )
     val state by viewModel.form.collectAsStateWithLifecycle()
     viewModel.activeVehicle.collectAsStateWithLifecycle()
@@ -296,13 +297,18 @@ fun AddReminderScreen(
 
 private class AddReminderVmFactory(
     private val editReminderId: Long?,
+    private val initialKind: ru.autolog.app.domain.MaintenanceKind? = null,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
+        val handle = extras.createSavedStateHandle()
+        if (editReminderId == null && initialKind != null && handle.get<String>("title") == null) {
+            handle["title"] = initialKind.title
+        }
         return AddReminderViewModel(
             AutologApp.instance.container.repository,
             editReminderId,
-            extras.createSavedStateHandle(),
+            handle,
         ) as T
     }
 }

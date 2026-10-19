@@ -32,8 +32,10 @@ import ru.autolog.app.ui.fluid.FluidNavTransitions
 import ru.autolog.app.ui.history.HistoryFilter
 import ru.autolog.app.ui.history.HistoryScreen
 import ru.autolog.app.ui.map.GasStationMapScreen
+import ru.autolog.app.domain.MaintenanceKind
 import ru.autolog.app.ui.docs.DocumentViewerScreen
 import ru.autolog.app.ui.docs.VehicleDocsScreen
+import ru.autolog.app.ui.maintenance.MaintenanceListScreen
 import ru.autolog.app.ui.note.NotepadScreen
 import ru.autolog.app.ui.refuel.AddRefuelScreen
 import ru.autolog.app.ui.reminder.AddReminderScreen
@@ -131,9 +133,19 @@ fun AutologNavHost() {
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onOpenRefuel = { id -> navController.navigate(Routes.refuelDetail(id)) },
                 onOpenReminder = { id -> navController.navigate(Routes.reminderDetail(id)) },
+                onOpenMaintenance = { navController.navigate(Routes.MAINTENANCE) },
                 onOpenExpense = { id -> navController.navigate(Routes.expenseDetail(id)) },
                 onOpenService = { id -> navController.navigate(Routes.serviceDetail(id)) },
                 onEditService = { id -> navController.navigate(Routes.serviceEdit(id)) },
+            )
+        }
+        composable(Routes.MAINTENANCE) {
+            MaintenanceListScreen(
+                onBack = { navController.popBackStack() },
+                onOpenReminder = { id -> navController.navigate(Routes.reminderDetail(id)) },
+                onAddReminderForKind = { kind ->
+                    navController.navigate(Routes.addReminderKind(kind.name))
+                },
             )
         }
         composable(Routes.HISTORY) {
@@ -206,6 +218,17 @@ fun AutologNavHost() {
         }
         composable(Routes.ADD_REMINDER) {
             AddReminderScreen(
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(
+            Routes.ADD_REMINDER_KIND,
+            arguments = listOf(navArgument("kind") { type = NavType.StringType }),
+        ) { entry ->
+            val kind = MaintenanceKind.fromStorage(entry.arguments?.getString("kind").orEmpty())
+            AddReminderScreen(
+                initialKind = kind,
                 onSaved = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
             )

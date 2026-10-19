@@ -91,6 +91,7 @@ object SettingsTags {
     const val UPDATE_SECTION = "settings_update_section"
     const val UPDATE_CHECK = "settings_update_check"
     const val UPDATE_INSTALL = "settings_update_install"
+    const val UPDATE_NOTES = "settings_update_notes"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -177,11 +178,16 @@ fun SettingsScreen(
         val json = withContext(Dispatchers.IO) { repo.exportBackupJson() }
         withContext(Dispatchers.IO) { googleDrive().uploadSnapshot(json).getOrThrow() }
         store.setLastCloudSyncEpochMs(System.currentTimeMillis())
+        store.setGoogleSessionStale(false)
         if (settings.syncPeriod == SyncPeriod.OFF) {
             store.setSyncPeriod(SyncPeriod.DAILY)
-            CloudSyncWorker.enqueue(context, SyncPeriod.DAILY)
+            CloudSyncWorker.enqueue(context, SyncPeriod.DAILY, replaceSchedule = true)
         } else {
-            CloudSyncWorker.enqueue(context, settings.syncPeriod)
+            CloudSyncWorker.enqueue(
+                context,
+                settings.syncPeriod,
+                replaceSchedule = false,
+            )
         }
         message = "Данные телефона сохранены в Google"
     }
@@ -215,9 +221,7 @@ fun SettingsScreen(
         scope.launch {
             busy = true
             runCatching {
-                if (result.resultCode != android.app.Activity.RESULT_OK) {
-                    error("Не удалось войти в Google. Попробуйте ещё раз.")
-                }
+                // Always parse Intent: Google often returns CANCELED with ApiException (e.g. code 10).
                 googleDrive().completeSignIn(result.data).getOrThrow()
                 afterSignInLinked()
             }.onFailure {
@@ -348,15 +352,32 @@ fun SettingsScreen(
                                 onClick = {
                                     scope.launch {
                                         store.setSyncPeriod(period)
-                                        CloudSyncWorker.enqueue(context, period)
+                                        CloudSyncWorker.enqueue(
+                                            context,
+                                            period,
+                                            replaceSchedule = true,
+                                        )
                                     }
                                 },
                             )
                         }
+                        if (settings.googleSessionStale) {
+                            Text(
+                                "Сессия Google сброшена (часто после переустановки). " +
+                                    "Без повторного входа автосохранение не работает.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            Button(
+                                onClick = { launchGoogleSignIn() },
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Войти в Google снова") }
+                        }
                         val last = settings.lastCloudSyncEpochMs
                         Text(
                             if (last != null) {
-                                "Последнее сохранение: ${Formatters.date(last)}"
+                                "Последнее сохранение: ${Formatters.dateTime(last)}"
                             } else {
                                 "Ещё не сохраняли в Google"
                             },
@@ -546,7 +567,8 @@ fun SettingsScreen(
                         .testTag(SettingsTags.BACKUP_IMPORT),
                 ) { Text("Восстановить данные") }
                 Text(
-                    "Восстановление заменит текущие записи содержимым файла.",
+                    "В копию входят машины, заправки, сервисы, напоминания, заметки, " +
+                        "документы (PDF/фото) и фото сервиса. Восстановление заменит всё на телефоне.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -577,8 +599,7 @@ fun SettingsScreen(
                                     }
                                     is AppUpdateChecker.CheckResult.UpdateAvailable -> {
                                         pendingRelease = result.release
-                                        updateStatus =
-                                            "Доступна ${result.release.versionName}"
+                                        updateStatus = "Доступна ${result.release.versionName}"
                                     }
                                     is AppUpdateChecker.CheckResult.Failed -> {
                                         updateStatus = result.message
@@ -602,7 +623,30 @@ fun SettingsScreen(
                         }
                         Text("Проверить обновления")
                     }
+                    updateStatus?.let { status ->
+                        Text(
+                            status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
                     pendingRelease?.let { release ->
+                        if (release.notes.isNotBlank()) {
+                            Text(
+                                "Что нового",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                            Text(
+                                release.notes,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .testTag(SettingsTags.UPDATE_NOTES),
+                            )
+                        }
                         Button(
                             onClick = {
                                 scope.launch {
@@ -637,14 +681,6 @@ fun SettingsScreen(
                                 .padding(top = 8.dp)
                                 .testTag(SettingsTags.UPDATE_INSTALL),
                         ) { Text("Обновить до ${release.versionName}") }
-                    }
-                    updateStatus?.let { status ->
-                        Text(
-                            status,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
                     }
                 }
             }

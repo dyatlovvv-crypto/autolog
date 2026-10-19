@@ -2,9 +2,14 @@ package ru.autolog.app.data.repository
 
 import android.content.Context
 import android.net.Uri
+import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
+import ru.autolog.app.data.backup.BackupFileCodec
 import ru.autolog.app.data.local.AutologDatabase
 import ru.autolog.app.data.local.VehicleDocsStore
 import ru.autolog.app.data.local.entity.ExpenseEntity
@@ -14,11 +19,15 @@ import ru.autolog.app.data.local.entity.ReminderEntity
 import ru.autolog.app.data.local.entity.ServiceEntity
 import ru.autolog.app.data.local.entity.VehicleDocumentEntity
 import ru.autolog.app.data.local.entity.VehicleEntity
+import ru.autolog.app.domain.ServicePhotosCodec
 import ru.autolog.app.domain.VehicleLimits
 import ru.autolog.app.domain.consumption.ConsumptionCalculator
 import ru.autolog.app.domain.consumption.ConsumptionCalculator.FullTankPoint
 import ru.autolog.app.domain.consumption.ConsumptionCalculator.RefuelPoint
 import ru.autolog.app.domain.reminder.ReminderForecast
+import ru.autolog.app.ui.note.NotepadBlock
+import ru.autolog.app.ui.note.NotepadDocument
+import ru.autolog.app.ui.note.NotepadPhotos
 
 class AutologRepository(
     private val db: AutologDatabase,
@@ -237,8 +246,8 @@ class AutologRepository(
         title: String,
         intervalKm: Int?,
         intervalDays: Int?,
-        lastChangeOdometerKm: Int,
-        lastChangeDateEpochMs: Long,
+        lastChangeOdometerKm: Int?,
+        lastChangeDateEpochMs: Long?,
         forecastFromFirstRecord: Boolean,
         showPhoneNotifications: Boolean,
         doneAtPurchase: Boolean,
@@ -251,12 +260,14 @@ class AutologRepository(
             return Result.failure(IllegalArgumentException("Укажите км и/или дни"))
         }
         val now = System.currentTimeMillis()
+        val baselineOdo = lastChangeOdometerKm ?: existing.baselineOdometerKm
+        val baselineDate = lastChangeDateEpochMs ?: existing.baselineDateEpochMs
         val avg = avgKmPerDay(existing.vehicleId)
         val forecast = ReminderForecast.compute(
             ReminderForecast.Input(
                 currentOdometerKm = vehicle.currentOdometerKm,
-                baselineOdometerKm = lastChangeOdometerKm,
-                baselineDateEpochMs = lastChangeDateEpochMs,
+                baselineOdometerKm = baselineOdo,
+                baselineDateEpochMs = baselineDate,
                 intervalKm = intervalKm,
                 intervalDays = intervalDays,
                 avgKmPerDay = avg,
@@ -268,8 +279,8 @@ class AutologRepository(
                 title = title.trim(),
                 intervalKm = intervalKm,
                 intervalDays = intervalDays,
-                baselineOdometerKm = lastChangeOdometerKm,
-                baselineDateEpochMs = lastChangeDateEpochMs,
+                baselineOdometerKm = baselineOdo,
+                baselineDateEpochMs = baselineDate,
                 forecastFromFirstRecord = forecastFromFirstRecord,
                 showPhoneNotifications = showPhoneNotifications,
                 doneAtPurchase = doneAtPurchase,
@@ -513,14 +524,17 @@ class AutologRepository(
 
     suspend fun getService(id: Long) = db.serviceDao().getById(id)
 
-    /** Full local backup as JSON (vehicles + children). */
+    /**
+     * Full local backup as JSON (vehicles + journal + attachments).
+     * Version 2 embeds vehicle docs, notepad images, and service photos as base64.
+     */
     suspend fun exportBackupJson(): String {
-        val root = org.json.JSONObject()
-        root.put("version", 1)
+        val root = JSONObject()
+        root.put("version", BACKUP_VERSION)
         root.put("exportedAtEpochMs", System.currentTimeMillis())
-        val vehiclesArr = org.json.JSONArray()
+        val vehiclesArr = JSONArray()
         db.vehicleDao().getAll().forEach { v ->
-            val vo = org.json.JSONObject()
+            val vo = JSONObject()
             vo.put("name", v.name)
             vo.put("manufacturer", v.manufacturer)
             vo.put("model", v.model)
@@ -533,10 +547,10 @@ class AutologRepository(
             vo.put("createdAtEpochMs", v.createdAtEpochMs)
             vo.put("updatedAtEpochMs", v.updatedAtEpochMs)
 
-            val refuels = org.json.JSONArray()
+            val refuels = JSONArray()
             db.refuellingDao().getByVehicle(v.id).forEach { r ->
                 refuels.put(
-                    org.json.JSONObject()
+                    JSONObject()
                         .put("dateEpochMs", r.dateEpochMs)
                         .put("odometerKm", r.odometerKm)
                         .put("volumeLiters", r.volumeLiters)
@@ -552,10 +566,10 @@ class AutologRepository(
             }
             vo.put("refuellings", refuels)
 
-            val expenses = org.json.JSONArray()
+            val expenses = JSONArray()
             db.expenseDao().getByVehicle(v.id).forEach { e ->
                 expenses.put(
-                    org.json.JSONObject()
+                    JSONObject()
                         .put("dateEpochMs", e.dateEpochMs)
                         .put("odometerKm", e.odometerKm)
                         .put("totalCost", e.totalCost)
@@ -568,35 +582,45 @@ class AutologRepository(
 
             val notepad = db.noteDao().getNotepad(v.id)
             if (notepad != null) {
-                vo.put(
-                    "notepad",
-                    org.json.JSONObject()
-                        .put("text", notepad.text)
-                        .put("updatedAtEpochMs", notepad.updatedAtEpochMs),
-                )
+                val notepadObj = JSONObject()
+                    .put("text", notepad.text)
+                    .put("updatedAtEpochMs", notepad.updatedAtEpochMs)
+                val imageFiles = JSONArray()
+                NotepadDocument.decode(notepad.text).blocks.forEach { block ->
+                    if (block is NotepadBlock.Image) {
+                        BackupFileCodec.fileEntry(block.path) { put("sourcePath", block.path) }
+                            ?.let { imageFiles.put(it) }
+                    }
+                }
+                if (imageFiles.length() > 0) notepadObj.put("images", imageFiles)
+                vo.put("notepad", notepadObj)
             }
 
-            val services = org.json.JSONArray()
+            val services = JSONArray()
             db.serviceDao().getByVehicleOldestFirst(v.id).forEach { s ->
-                services.put(
-                    org.json.JSONObject()
-                        .put("dateEpochMs", s.dateEpochMs)
-                        .put("odometerKm", s.odometerKm)
-                        .put("totalCost", s.totalCost)
-                        .put("serviceType", s.serviceType)
-                        .put("description", s.description)
-                        .put("checklistJson", s.checklistJson)
-                        .put("photoPathsJson", s.photoPathsJson)
-                        .put("doneAtPurchase", s.doneAtPurchase)
-                        .put("createdAtEpochMs", s.createdAtEpochMs),
-                )
+                val so = JSONObject()
+                    .put("dateEpochMs", s.dateEpochMs)
+                    .put("odometerKm", s.odometerKm)
+                    .put("totalCost", s.totalCost)
+                    .put("serviceType", s.serviceType)
+                    .put("description", s.description)
+                    .put("checklistJson", s.checklistJson)
+                    .put("photoPathsJson", s.photoPathsJson)
+                    .put("doneAtPurchase", s.doneAtPurchase)
+                    .put("createdAtEpochMs", s.createdAtEpochMs)
+                val photos = JSONArray()
+                ServicePhotosCodec.decode(s.photoPathsJson).forEach { path ->
+                    BackupFileCodec.fileEntry(path)?.let { photos.put(it) }
+                }
+                if (photos.length() > 0) so.put("photos", photos)
+                services.put(so)
             }
             vo.put("services", services)
 
-            val reminders = org.json.JSONArray()
+            val reminders = JSONArray()
             db.reminderDao().getByVehicle(v.id).forEach { rem ->
                 reminders.put(
-                    org.json.JSONObject()
+                    JSONObject()
                         .put("title", rem.title)
                         .put("intervalKm", rem.intervalKm)
                         .put("intervalDays", rem.intervalDays)
@@ -616,6 +640,21 @@ class AutologRepository(
                 )
             }
             vo.put("reminders", reminders)
+
+            val documents = JSONArray()
+            db.vehicleDocumentDao().getByVehicle(v.id).forEach { doc ->
+                val b64 = BackupFileCodec.readBase64(doc.filePath) ?: return@forEach
+                documents.put(
+                    JSONObject()
+                        .put("title", doc.title)
+                        .put("mimeType", doc.mimeType)
+                        .put("fileName", File(doc.filePath).name)
+                        .put("contentBase64", b64)
+                        .put("createdAtEpochMs", doc.createdAtEpochMs),
+                )
+            }
+            vo.put("documents", documents)
+
             vehiclesArr.put(vo)
         }
         root.put("vehicles", vehiclesArr)
@@ -627,8 +666,9 @@ class AutologRepository(
      * Only call after explicit user confirmation in Settings.
      */
     suspend fun restoreBackupJson(json: String): Result<Unit> = runCatching {
-        val root = org.json.JSONObject(json)
+        val root = JSONObject(json)
         val vehicles = root.getJSONArray("vehicles")
+        clearAttachmentDirs()
         db.clearAllTables()
         var firstId: Long? = null
         for (i in 0 until vehicles.length()) {
@@ -698,10 +738,15 @@ class AutologRepository(
 
             val notepad = vo.optJSONObject("notepad")
             if (notepad != null) {
+                val restoredText = restoreNotepadText(
+                    vehicleId = newId,
+                    rawText = notepad.optString("text", ""),
+                    imagesArr = notepad.optJSONArray("images"),
+                )
                 db.noteDao().insert(
                     NoteEntity(
                         vehicleId = newId,
-                        text = notepad.optString("text", ""),
+                        text = restoredText,
                         updatedAtEpochMs = notepad.optLong(
                             "updatedAtEpochMs",
                             System.currentTimeMillis(),
@@ -734,6 +779,10 @@ class AutologRepository(
             if (services != null) {
                 for (j in 0 until services.length()) {
                     val s = services.getJSONObject(j)
+                    val photoPathsJson = restoreServicePhotos(
+                        photosArr = s.optJSONArray("photos"),
+                        legacyPathsJson = s.optString("photoPathsJson").ifBlank { null },
+                    )
                     db.serviceDao().insert(
                         ServiceEntity(
                             vehicleId = newId,
@@ -743,7 +792,7 @@ class AutologRepository(
                             serviceType = s.getString("serviceType"),
                             description = s.optString("description").ifBlank { null },
                             checklistJson = s.optString("checklistJson").ifBlank { null },
-                            photoPathsJson = s.optString("photoPathsJson").ifBlank { null },
+                            photoPathsJson = photoPathsJson,
                             doneAtPurchase = s.optBoolean("doneAtPurchase", false),
                             createdAtEpochMs = s.optLong("createdAtEpochMs", now),
                         ),
@@ -778,8 +827,76 @@ class AutologRepository(
                     )
                 }
             }
+
+            val documents = BackupFileCodec.parseFileEntries(vo.optJSONArray("documents"))
+            documents.forEach { entry ->
+                val written = BackupFileCodec.writeBase64(
+                    dir = VehicleDocsStore.dir(appContext, newId),
+                    fileName = entry.fileName.ifBlank { "${UUID.randomUUID()}.bin" },
+                    base64 = entry.contentBase64,
+                ) ?: return@forEach
+                db.vehicleDocumentDao().insert(
+                    VehicleDocumentEntity(
+                        vehicleId = newId,
+                        title = entry.title,
+                        mimeType = entry.mimeType,
+                        filePath = written.absolutePath,
+                        createdAtEpochMs = entry.createdAtEpochMs.takeIf { it > 0L } ?: now,
+                    ),
+                )
+            }
         }
         firstId?.let { db.vehicleDao().switchActive(it, System.currentTimeMillis()) }
+    }
+
+    private fun clearAttachmentDirs() {
+        runCatching { File(appContext.filesDir, "vehicle_docs").deleteRecursively() }
+        runCatching { File(appContext.filesDir, "notepad_photos").deleteRecursively() }
+        runCatching { File(appContext.filesDir, "service_photos").deleteRecursively() }
+    }
+
+    private fun restoreNotepadText(
+        vehicleId: Long,
+        rawText: String,
+        imagesArr: JSONArray?,
+    ): String {
+        val entries = BackupFileCodec.parseFileEntries(imagesArr)
+        if (entries.isEmpty()) return rawText
+        val bySource = entries.associateBy { it.sourcePath.orEmpty() }
+        val byName = entries.associateBy { it.fileName }
+        val doc = NotepadDocument.decode(rawText)
+        val remapped = doc.blocks.map { block ->
+            if (block !is NotepadBlock.Image) return@map block
+            val entry = bySource[block.path]
+                ?: byName[File(block.path).name]
+                ?: return@map block
+            val written = BackupFileCodec.writeBase64(
+                dir = NotepadPhotos.dir(appContext, vehicleId),
+                fileName = entry.fileName.ifBlank { "${UUID.randomUUID()}.jpg" },
+                base64 = entry.contentBase64,
+            ) ?: return@map block
+            block.copy(path = written.absolutePath)
+        }
+        return NotepadDocument(remapped).encode()
+    }
+
+    private fun restoreServicePhotos(
+        photosArr: JSONArray?,
+        legacyPathsJson: String?,
+    ): String? {
+        val entries = BackupFileCodec.parseFileEntries(photosArr)
+        if (entries.isNotEmpty()) {
+            val dir = File(appContext.filesDir, "service_photos").also { it.mkdirs() }
+            val paths = entries.mapNotNull { entry ->
+                BackupFileCodec.writeBase64(
+                    dir = dir,
+                    fileName = entry.fileName.ifBlank { "${UUID.randomUUID()}.jpg" },
+                    base64 = entry.contentBase64,
+                )?.absolutePath
+            }
+            return ServicePhotosCodec.encode(paths).takeIf { paths.isNotEmpty() }
+        }
+        return legacyPathsJson
     }
 
     suspend fun refreshRemindersForVehicle(vehicleId: Long) {
@@ -917,6 +1034,8 @@ class AutologRepository(
 
     companion object {
         private const val TIMELINE_PER_TYPE = 30
+        /** 2 = journal + vehicle docs / notepad images / service photos (base64). */
+        const val BACKUP_VERSION = 2
     }
 }
 

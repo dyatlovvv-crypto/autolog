@@ -47,15 +47,14 @@ class GoogleDriveBackupRepository(
     fun hasWebClientId(): Boolean = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
 
     fun signInClient(): GoogleSignInClient {
-        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        // Drive App Data needs email + scope only. requestIdToken(webClientId) often
+        // causes ApiException 10 (DEVELOPER_ERROR) when the Web client is mislinked.
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestProfile()
             .requestScopes(Scope(DriveScopes.DRIVE_APPDATA))
-        val webId = BuildConfig.GOOGLE_WEB_CLIENT_ID
-        if (webId.isNotBlank()) {
-            builder.requestIdToken(webId)
-        }
-        return GoogleSignIn.getClient(appContext, builder.build())
+            .build()
+        return GoogleSignIn.getClient(appContext, options)
     }
 
     override fun signInIntent(): Intent = signInClient().signInIntent
@@ -81,10 +80,15 @@ class GoogleDriveBackupRepository(
             val code = (e as? com.google.android.gms.common.api.ApiException)?.statusCode
             when (code) {
                 10 -> error(
-                    "Вход в Google сейчас недоступен. Позже попробуйте снова или напишите в поддержку.",
+                    "Вход в Google недоступен (ошибка настройки OAuth, код 10). " +
+                        "Проверьте SHA-1 и package ru.autolog.app в Google Cloud.",
                 )
                 12501 -> error("Вход отменён")
-                else -> error("Не удалось войти в Google. Попробуйте ещё раз.")
+                else -> error(
+                    "Не удалось войти в Google" +
+                        (if (code != null) " (код $code)" else "") +
+                        ". Попробуйте ещё раз.",
+                )
             }
         }
         accountInfo(taskAccount) ?: error("Не удалось получить данные аккаунта Google")

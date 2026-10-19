@@ -143,9 +143,7 @@ class AddReminderViewModel(
                     it.copy(vehicleId = vehicle.id, currentOdometer = vehicle.currentOdometerKm)
                 }
                 if (editReminderId == null && !_meta.value.draftRestored) {
-                    if (lastOdoFlow.value.isEmpty()) {
-                        savedStateHandle[KEY_LAST_ODO] = vehicle.currentOdometerKm.toString()
-                    }
+                    // Last change odometer stays optional — do not prefill.
                     _meta.update { it.copy(draftRestored = true) }
                 }
             }
@@ -236,8 +234,8 @@ class AddReminderViewModel(
             _meta.update { it.copy(error = "Укажите название") }
             return
         }
-        if (lastOdo == null) {
-            _meta.update { it.copy(error = "Укажите пробег последней замены") }
+        if (km == null && days == null) {
+            _meta.update { it.copy(error = "Укажите интервал в км или днях") }
             return
         }
         viewModelScope.launch {
@@ -268,13 +266,20 @@ class AddReminderViewModel(
                 )
             }
             result.onSuccess {
-                val next = lastOdo + (km ?: 0)
+                val baselineKm = lastOdo ?: s.currentOdometer
+                val next = baselineKm + (km ?: 0)
                 val summary = buildString {
                     append("Интервал: ")
                     if (km != null) append("каждые $km км")
                     if (km != null && days != null) append(" или ")
                     if (days != null) append("каждые $days дн.")
-                    append("\nПоследняя замена: $lastOdo км, ${dateFmt.format(Date(s.lastChangeDateEpochMs))}")
+                    if (lastOdo != null) {
+                        append(
+                            "\nПоследняя замена: $lastOdo км, ${dateFmt.format(Date(s.lastChangeDateEpochMs))}",
+                        )
+                    } else {
+                        append("\nПробег последней замены не указан")
+                    }
                     if (km != null) append("\nСледующая по пробегу: ~$next км")
                 }
                 _meta.update {

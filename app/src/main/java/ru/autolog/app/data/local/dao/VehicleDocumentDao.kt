@@ -17,6 +17,11 @@ interface VehicleDocumentDao {
     @Query("SELECT * FROM vehicle_documents WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): VehicleDocumentEntity?
 
+    @Query(
+        "SELECT * FROM vehicle_documents WHERE vehicleId = :vehicleId ORDER BY createdAtEpochMs ASC",
+    )
+    suspend fun getByVehicle(vehicleId: Long): List<VehicleDocumentEntity>
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(doc: VehicleDocumentEntity): Long
 

@@ -9,6 +9,8 @@ object Routes {
     const val ADD_VEHICLE = "add_vehicle"
     const val ADD_REFUEL = "add_refuel"
     const val ADD_REMINDER = "add_reminder"
+    const val ADD_REMINDER_KIND = "add_reminder/kind/{kind}"
+    const val MAINTENANCE = "maintenance"
     const val ADD_EXPENSE = "add_expense"
     const val ADD_EXPENSE_WASH = "add_expense_wash"
     const val ADD_SERVICE = "add_service/{kind}"
@@ -23,6 +25,7 @@ object Routes {
     const val SERVICE_EDIT = "service_edit/{id}"
 
     fun addService(kind: String) = "add_service/$kind"
+    fun addReminderKind(kind: String) = "add_reminder/kind/$kind"
     fun history(filter: String) = "history/$filter"
     fun refuelDetail(id: Long) = "refuel/$id"
     fun reminderDetail(id: Long) = "reminder/$id"
