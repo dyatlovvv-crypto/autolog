@@ -30,14 +30,37 @@ enum class MaintenanceKind(
 }
 
 data class MaintenanceSlot(
-    val kind: MaintenanceKind,
+    val kind: MaintenanceKind?,
     val reminder: ReminderEntity?,
-)
+) {
+    val title: String
+        get() = kind?.title
+            ?: reminder?.title?.takeIf { it.isNotBlank() }
+            ?: "Напоминание"
+
+    val listKey: String
+        get() = kind?.name ?: "custom_${reminder?.id ?: "new"}"
+}
 
 object MaintenanceCatalog {
+    /** Fixed kinds + user-defined reminders (titles that don't match a catalog kind). */
+    fun allListSlots(reminders: List<ReminderEntity>): List<MaintenanceSlot> {
+        val kindSlots = MaintenanceKind.entries.map { kind ->
+            val match = reminders
+                .filter { kind.matches(it.title) }
+                .minByOrNull { it.remainingKm ?: Int.MAX_VALUE }
+            MaintenanceSlot(kind, match)
+        }
+        val customs = reminders
+            .filter { MaintenanceKind.fromTitle(it.title) == null }
+            .sortedBy { it.remainingKm ?: Int.MAX_VALUE }
+            .map { MaintenanceSlot(kind = null, reminder = it) }
+        return kindSlots + customs
+    }
+
     /**
-     * Up to [limit] slots for the dashboard: filled reminders nearest by remaining km,
-     * then empty kinds as placeholders so the UI always has [limit] cards when needed.
+     * Up to [limit] slots for the dashboard: filled reminders nearest by remaining km
+     * (catalog + custom), then empty kinds as placeholders.
      */
     fun dashboardSlots(
         reminders: List<ReminderEntity>,
@@ -45,8 +68,13 @@ object MaintenanceCatalog {
     ): List<MaintenanceSlot> {
         if (limit <= 0) return emptyList()
         val byKind = LinkedHashMap<MaintenanceKind, ReminderEntity>()
+        val customs = ArrayList<ReminderEntity>()
         reminders.forEach { reminder ->
-            val kind = MaintenanceKind.fromTitle(reminder.title) ?: return@forEach
+            val kind = MaintenanceKind.fromTitle(reminder.title)
+            if (kind == null) {
+                customs += reminder
+                return@forEach
+            }
             val existing = byKind[kind]
             if (existing == null ||
                 (reminder.remainingKm ?: Int.MAX_VALUE) < (existing.remainingKm ?: Int.MAX_VALUE)
@@ -54,18 +82,16 @@ object MaintenanceCatalog {
                 byKind[kind] = reminder
             }
         }
-        val nearestFilled = byKind.entries
-            .map { MaintenanceSlot(it.key, it.value) }
-            .sortedWith(
-                compareBy(
-                    nullsLast(),
-                ) { it.reminder?.remainingKm },
+        val nearestFilled = (
+            byKind.entries.map { MaintenanceSlot(it.key, it.value) } +
+                customs.map { MaintenanceSlot(null, it) }
             )
+            .sortedWith(compareBy(nullsLast()) { it.reminder?.remainingKm })
             .take(limit)
         if (nearestFilled.size >= limit) return nearestFilled
-        val used = nearestFilled.map { it.kind }.toSet()
+        val usedKinds = nearestFilled.mapNotNull { it.kind }.toSet()
         val pads = MaintenanceKind.entries
-            .filter { it !in used }
+            .filter { it !in usedKinds }
             .take(limit - nearestFilled.size)
             .map { MaintenanceSlot(it, null) }
         return nearestFilled + pads

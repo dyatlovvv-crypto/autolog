@@ -191,9 +191,6 @@ class AutologRepository(
     ): Result<Long> {
         val vehicle = db.vehicleDao().getById(vehicleId)
             ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
-        if (intervalKm == null && intervalDays == null) {
-            return Result.failure(IllegalArgumentException("Укажите км и/или дни"))
-        }
         val now = System.currentTimeMillis()
         val services = db.serviceDao().getByVehicleOldestFirst(vehicleId)
         val baseline = when {
@@ -256,9 +253,6 @@ class AutologRepository(
             ?: return Result.failure(IllegalArgumentException("Напоминание не найдено"))
         val vehicle = db.vehicleDao().getById(existing.vehicleId)
             ?: return Result.failure(IllegalArgumentException("Авто не найдено"))
-        if (intervalKm == null && intervalDays == null) {
-            return Result.failure(IllegalArgumentException("Укажите км и/или дни"))
-        }
         val now = System.currentTimeMillis()
         val baselineOdo = lastChangeOdometerKm ?: existing.baselineOdometerKm
         val baselineDate = lastChangeDateEpochMs ?: existing.baselineDateEpochMs

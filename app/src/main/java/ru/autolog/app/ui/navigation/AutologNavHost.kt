@@ -146,6 +146,9 @@ fun AutologNavHost() {
                 onAddReminderForKind = { kind ->
                     navController.navigate(Routes.addReminderKind(kind.name))
                 },
+                onAddCustomReminder = {
+                    navController.navigate(Routes.ADD_REMINDER_CUSTOM)
+                },
             )
         }
         composable(Routes.HISTORY) {
@@ -220,6 +223,14 @@ fun AutologNavHost() {
             AddReminderScreen(
                 onSaved = { navController.popBackStack() },
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.ADD_REMINDER_CUSTOM) {
+            AddReminderScreen(
+                blankCustom = true,
+                onSaved = { navController.popBackStack() },
+                onBack = { navController.popBackStack() },
+                onDeleted = { navController.popBackStack() },
             )
         }
         composable(

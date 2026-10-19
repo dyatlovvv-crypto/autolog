@@ -9,6 +9,7 @@ object Routes {
     const val ADD_VEHICLE = "add_vehicle"
     const val ADD_REFUEL = "add_refuel"
     const val ADD_REMINDER = "add_reminder"
+    const val ADD_REMINDER_CUSTOM = "add_reminder/custom"
     const val ADD_REMINDER_KIND = "add_reminder/kind/{kind}"
     const val MAINTENANCE = "maintenance"
     const val ADD_EXPENSE = "add_expense"

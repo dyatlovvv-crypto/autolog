@@ -16,6 +16,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -244,15 +245,23 @@ fun AddRefuelScreen(
                             singleLine = true,
                             shape = GlassShapeLarge,
                             colors = glassFieldColors(),
-                            trailingIcon = {
-                                TextButton(
-                                    onClick = onPickStationOnMap,
-                                    modifier = Modifier.testTag(AddRefuelTags.OPEN_MAP),
-                                ) {
-                                    Text("Карта")
-                                }
-                            },
                         )
+                        // Separate button: trailingIcon often misses taps after keyboard / filled form.
+                        OutlinedButton(
+                            onClick = onPickStationOnMap,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(AddRefuelTags.OPEN_MAP),
+                            shape = GlassShapeLarge,
+                        ) {
+                            Text(
+                                if (state.station.isBlank()) {
+                                    "Выбрать АЗС на карте"
+                                } else {
+                                    "Сменить АЗС на карте"
+                                },
+                            )
+                        }
                         state.error?.let {
                             Text(
                                 text = it,

@@ -4,7 +4,9 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -16,6 +18,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,9 +29,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -40,6 +49,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.cos
 import org.json.JSONArray
 import org.json.JSONObject
@@ -63,14 +73,52 @@ fun GasStationMapScreen(
     onStationPicked: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val io = remember { Executors.newSingleThreadExecutor() }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var bridgeRef by remember { mutableStateOf<MapJsBridge?>(null) }
+    var permissionNonce by remember { mutableStateOf(0) }
+
     val underEspresso = remember {
         try {
             Class.forName("androidx.test.espresso.Espresso")
             true
         } catch (_: ClassNotFoundException) {
             false
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        permissionNonce += 1
+        val wv = webViewRef
+        val bridge = bridgeRef
+        if (wv != null && bridge != null) {
+            centerAndLoadStations(wv, bridge)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val fine = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
+        }
+        onDispose {
+            io.shutdownNow()
         }
     }
 
@@ -111,7 +159,7 @@ fun GasStationMapScreen(
                         settings.displayZoomControls = false
                         settings.userAgentString =
                             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 " +
-                                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Autolog/0.2.1"
+                                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Autolog/0.7.3"
 
                         val bridge = MapJsBridge(
                             webView = this,
@@ -119,6 +167,8 @@ fun GasStationMapScreen(
                             io = io,
                             onStationPicked = onStationPicked,
                         )
+                        bridgeRef = bridge
+                        webViewRef = this
                         addJavascriptInterface(bridge, "Autolog")
 
                         webChromeClient = object : WebChromeClient() {
@@ -144,7 +194,7 @@ fun GasStationMapScreen(
 
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
-                                Log.d(TAG, "page finished: $url")
+                                Log.d(TAG, "page finished: $url nonce=$permissionNonce")
                                 view.post {
                                     view.evaluateJavascript(
                                         "if(window.__autologMap){window.__autologMap.invalidateSize(true);}",
@@ -214,7 +264,7 @@ private class MapJsBridge(
                         null,
                     )
                 } else {
-                    val escaped = org.json.JSONObject.quote(json)
+                    val escaped = JSONObject.quote(json)
                     webView.evaluateJavascript(
                         "window.showStations && window.showStations($escaped);",
                         null,
@@ -235,7 +285,7 @@ private fun centerAndLoadStations(webView: WebView, bridge: MapJsBridge) {
 
     fun go(lat: Double, lon: Double, msg: String) {
         webView.evaluateJavascript(
-            "window.showHere && window.showHere($lat, $lon, ${org.json.JSONObject.quote(msg)});",
+            "window.showHere && window.showHere($lat, $lon, ${JSONObject.quote(msg)});",
             null,
         )
         bridge.fetchStations(lat, lon)
@@ -246,49 +296,83 @@ private fun centerAndLoadStations(webView: WebView, bridge: MapJsBridge) {
         return
     }
     val lm = ctx.getSystemService(LocationManager::class.java)
-    val loc: Location? = lm?.let { manager ->
+    val last: Location? = lm?.let { manager ->
         sequenceOf(
-            LocationManager.NETWORK_PROVIDER,
             LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
             LocationManager.PASSIVE_PROVIDER,
         ).mapNotNull { provider ->
             runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
         }.maxByOrNull { it.time }
     }
 
-    if (loc != null) {
-        Log.d(TAG, "lastKnown=${loc.latitude},${loc.longitude}")
-        go(loc.latitude, loc.longitude, "Ищу заправки рядом… тапните маркер")
+    val usedFresh = AtomicBoolean(false)
+    if (last != null && System.currentTimeMillis() - last.time < 5 * 60_000L) {
+        Log.d(TAG, "lastKnown fresh=${last.latitude},${last.longitude}")
+        go(last.latitude, last.longitude, "Ищу заправки рядом… тапните маркер")
+    } else if (last != null) {
+        Log.d(TAG, "lastKnown stale=${last.latitude},${last.longitude}")
+        go(last.latitude, last.longitude, "Уточняю местоположение… тапните маркер")
     } else {
-        go(55.75, 37.62, "Нет точной геолокации — Москва. Ищу АЗС…")
-        runCatching {
-            @Suppress("DEPRECATION")
-            lm?.requestSingleUpdate(
-                LocationManager.NETWORK_PROVIDER,
-                { fresh ->
-                    webView.post {
-                        go(fresh.latitude, fresh.longitude, "Ищу заправки рядом… тапните маркер")
-                    }
-                },
+        go(55.75, 37.62, "Определяю местоположение…")
+    }
+
+    val listener = object : LocationListener {
+        override fun onLocationChanged(fresh: Location) {
+            if (!usedFresh.compareAndSet(false, true)) return
+            runCatching { lm?.removeUpdates(this) }
+            Log.d(TAG, "fresh=${fresh.latitude},${fresh.longitude}")
+            webView.post {
+                go(fresh.latitude, fresh.longitude, "Ищу заправки рядом… тапните маркер")
+            }
+        }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+        override fun onProviderEnabled(provider: String) = Unit
+        override fun onProviderDisabled(provider: String) = Unit
+    }
+
+    runCatching {
+        if (fine) {
+            lm?.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                0L,
+                0f,
+                listener,
                 Looper.getMainLooper(),
             )
         }
+        lm?.requestLocationUpdates(
+            LocationManager.NETWORK_PROVIDER,
+            0L,
+            0f,
+            listener,
+            Looper.getMainLooper(),
+        )
     }
+    webView.postDelayed({
+        runCatching { lm?.removeUpdates(listener) }
+    }, 12_000L)
 }
 
-private const val HTTP_UA = "Autolog/0.2.1 (Android; fuel map)"
+private const val HTTP_UA = "Autolog/0.7.3 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
 
 /** Overpass race + Nominatim/Photon fallbacks. Returns Overpass-shaped JSON for JS. */
 private fun queryOverpass(lat: Double, lon: Double): String? {
-    val aroundM = 4_000
+    val aroundM = 8_000
     val q = """
-        [out:json][timeout:15];
-        nwr["amenity"="fuel"](around:$aroundM,$lat,$lon);
+        [out:json][timeout:20];
+        (
+          nwr["amenity"="fuel"](around:$aroundM,$lat,$lon);
+          nwr["highway"="services"]["fuel"="yes"](around:$aroundM,$lat,$lon);
+        );
         out center tags;
     """.trimIndent()
     val endpoints = listOf(
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.openstreetmap.ru/cgi/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
+        "https://overpass.osm.ch/api/interpreter",
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
     )
@@ -298,7 +382,7 @@ private fun queryOverpass(lat: Double, lon: Double): String? {
         endpoints.forEach { ep ->
             ecs.submit(Callable { postOverpass(ep, q) })
         }
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(18)
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(22)
         for (i in endpoints.indices) {
             val waitNs = (deadline - System.nanoTime()).coerceAtLeast(0)
             val fut = ecs.poll(waitNs, TimeUnit.NANOSECONDS) ?: break
@@ -325,11 +409,12 @@ private fun postOverpass(endpoint: String, query: String): String? {
     return try {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
-            connectTimeout = 8_000
-            readTimeout = 16_000
+            connectTimeout = 10_000
+            readTimeout = 20_000
             doOutput = true
             setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
             setRequestProperty("User-Agent", HTTP_UA)
+            setRequestProperty("Accept", "application/json")
         }
         conn.outputStream.bufferedWriter().use {
             it.write("data=" + java.net.URLEncoder.encode(query, "UTF-8"))
@@ -352,15 +437,17 @@ private fun postOverpass(endpoint: String, query: String): String? {
 }
 
 private fun queryNominatimFuel(lat: Double, lon: Double): String? {
-    val delta = 0.06
+    val delta = 0.08
     val south = lat - delta
     val north = lat + delta
     val west = lon - delta / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
     val east = lon + delta / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
     val viewbox = "$west,$north,$east,$south"
+    val q = java.net.URLEncoder.encode("[amenity=fuel]", "UTF-8")
+    val vb = java.net.URLEncoder.encode(viewbox, "UTF-8")
     val url =
-        "https://nominatim.openstreetmap.org/search?format=jsonv2&amenity=fuel" +
-            "&limit=50&bounded=1&viewbox=${java.net.URLEncoder.encode(viewbox, "UTF-8")}"
+        "https://nominatim.openstreetmap.org/search?format=jsonv2&q=$q" +
+            "&limit=50&bounded=1&viewbox=$vb"
     return try {
         val raw = httpGet(url) ?: return null
         val arr = JSONArray(raw)
@@ -425,8 +512,8 @@ private fun queryPhotonFuel(lat: Double, lon: Double): String? {
 private fun httpGet(url: String): String? {
     val conn = (URL(url).openConnection() as HttpURLConnection).apply {
         requestMethod = "GET"
-        connectTimeout = 8_000
-        readTimeout = 12_000
+        connectTimeout = 10_000
+        readTimeout = 14_000
         setRequestProperty("User-Agent", HTTP_UA)
         setRequestProperty("Accept", "application/json")
     }

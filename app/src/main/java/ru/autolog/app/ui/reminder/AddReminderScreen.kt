@@ -67,10 +67,11 @@ fun AddReminderScreen(
     onDeleted: (() -> Unit)? = null,
     editReminderId: Long? = null,
     initialKind: ru.autolog.app.domain.MaintenanceKind? = null,
+    blankCustom: Boolean = false,
 ) {
     val viewModel: AddReminderViewModel = viewModel(
-        key = "reminder-${editReminderId ?: "new"}-${initialKind?.name ?: "plain"}",
-        factory = AddReminderVmFactory(editReminderId, initialKind),
+        key = "reminder-${editReminderId ?: "new"}-${initialKind?.name ?: if (blankCustom) "custom" else "plain"}",
+        factory = AddReminderVmFactory(editReminderId, initialKind, blankCustom),
     )
     val state by viewModel.form.collectAsStateWithLifecycle()
     viewModel.activeVehicle.collectAsStateWithLifecycle()
@@ -137,7 +138,11 @@ fun AddReminderScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
-                            text = "Интервал: км ИЛИ дни — что наступит раньше.",
+                            text = if (blankCustom) {
+                                "Своё напоминание. Все поля необязательны."
+                            } else {
+                                "Интервал: км ИЛИ дни — что наступит раньше. Поля необязательны."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         OutlinedTextField(
@@ -298,12 +303,22 @@ fun AddReminderScreen(
 private class AddReminderVmFactory(
     private val editReminderId: Long?,
     private val initialKind: ru.autolog.app.domain.MaintenanceKind? = null,
+    private val blankCustom: Boolean = false,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         val handle = extras.createSavedStateHandle()
-        if (editReminderId == null && initialKind != null && handle.get<String>("title") == null) {
-            handle["title"] = initialKind.title
+        if (editReminderId == null) {
+            when {
+                blankCustom -> {
+                    if (handle.get<String>("title") == null) handle["title"] = ""
+                    if (handle.get<String>("intervalKm") == null) handle["intervalKm"] = ""
+                    if (handle.get<String>("intervalDays") == null) handle["intervalDays"] = ""
+                }
+                initialKind != null && handle.get<String>("title") == null -> {
+                    handle["title"] = initialKind.title
+                }
+            }
         }
         return AddReminderViewModel(
             AutologApp.instance.container.repository,

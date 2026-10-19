@@ -230,20 +230,13 @@ class AddReminderViewModel(
         val km = s.intervalKm.toIntOrNull()
         val days = s.intervalDays.toIntOrNull()
         val lastOdo = s.lastChangeOdometer.toIntOrNull()
-        if (s.title.isBlank()) {
-            _meta.update { it.copy(error = "Укажите название") }
-            return
-        }
-        if (km == null && days == null) {
-            _meta.update { it.copy(error = "Укажите интервал в км или днях") }
-            return
-        }
+        val title = s.title.trim().ifBlank { "Напоминание" }
         viewModelScope.launch {
             _meta.update { it.copy(saving = true, error = null) }
             val result = if (s.editId != null) {
                 repository.updateReminder(
                     id = s.editId,
-                    title = s.title,
+                    title = title,
                     intervalKm = km,
                     intervalDays = days,
                     lastChangeOdometerKm = lastOdo,
@@ -255,7 +248,7 @@ class AddReminderViewModel(
             } else {
                 repository.addReminder(
                     vehicleId = vehicleId,
-                    title = s.title,
+                    title = title,
                     intervalKm = km,
                     intervalDays = days,
                     lastChangeOdometerKm = lastOdo,
@@ -269,10 +262,14 @@ class AddReminderViewModel(
                 val baselineKm = lastOdo ?: s.currentOdometer
                 val next = baselineKm + (km ?: 0)
                 val summary = buildString {
-                    append("Интервал: ")
-                    if (km != null) append("каждые $km км")
-                    if (km != null && days != null) append(" или ")
-                    if (days != null) append("каждые $days дн.")
+                    if (km == null && days == null) {
+                        append("Интервал не указан")
+                    } else {
+                        append("Интервал: ")
+                        if (km != null) append("каждые $km км")
+                        if (km != null && days != null) append(" или ")
+                        if (days != null) append("каждые $days дн.")
+                    }
                     if (lastOdo != null) {
                         append(
                             "\nПоследняя замена: $lastOdo км, ${dateFmt.format(Date(s.lastChangeDateEpochMs))}",

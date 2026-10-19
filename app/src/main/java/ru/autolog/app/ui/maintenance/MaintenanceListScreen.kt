@@ -24,7 +24,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import ru.autolog.app.data.local.entity.ReminderEntity
+import ru.autolog.app.data.repository.DashboardSnapshot
+import ru.autolog.app.domain.MaintenanceCatalog
 import ru.autolog.app.domain.MaintenanceKind
 import ru.autolog.app.domain.MaintenanceSlot
 import ru.autolog.app.ui.AutologViewModelFactory
@@ -35,12 +36,13 @@ import ru.autolog.app.ui.glass.GlassScaffold
 import ru.autolog.app.ui.glass.GlassShapeMedium
 import ru.autolog.app.ui.glass.GlassTopAppBar
 import ru.autolog.app.ui.theme.AutologSpace
-import ru.autolog.app.data.repository.DashboardSnapshot
 
 object MaintenanceListTags {
     const val SCREEN = "maintenance_list_screen"
     const val BACK = "maintenance_list_back"
+    const val ADD_CUSTOM = "maintenance_add_custom"
     fun row(kind: MaintenanceKind) = "maintenance_row_${kind.name}"
+    fun customRow(id: Long) = "maintenance_row_custom_$id"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,12 +51,13 @@ fun MaintenanceListScreen(
     onBack: () -> Unit,
     onOpenReminder: (Long) -> Unit,
     onAddReminderForKind: (MaintenanceKind) -> Unit,
+    onAddCustomReminder: () -> Unit,
     viewModel: DashboardViewModel = viewModel(factory = AutologViewModelFactory()),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val dash = state.dashboard as? DashboardSnapshot.Data
     val reminders = dash?.activeReminders.orEmpty()
-    val slots = remember(reminders) { allMaintenanceSlots(reminders) }
+    val slots = remember(reminders) { MaintenanceCatalog.allListSlots(reminders) }
 
     GlassScaffold(
         modifier = Modifier
@@ -68,6 +71,18 @@ fun MaintenanceListScreen(
                         onClick = onBack,
                         modifier = Modifier.testTag(MaintenanceListTags.BACK),
                     ) { Text("←") }
+                },
+                actions = {
+                    IconButton(
+                        onClick = onAddCustomReminder,
+                        modifier = Modifier.testTag(MaintenanceListTags.ADD_CUSTOM),
+                    ) {
+                        Text(
+                            "+",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 },
             )
         },
@@ -85,19 +100,22 @@ fun MaintenanceListScreen(
         ) {
             item {
                 Text(
-                    "Заполнять не обязательно — только то, что нужно.",
+                    "Заполнять не обязательно — только то, что нужно. «+» — своё напоминание.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = AutologSpace.xs),
                 )
             }
-            items(slots, key = { it.kind.name }) { slot ->
+            items(slots, key = { it.listKey }) { slot ->
                 MaintenanceRow(
                     slot = slot,
                     onClick = {
                         val reminder = slot.reminder
-                        if (reminder != null) onOpenReminder(reminder.id)
-                        else onAddReminderForKind(slot.kind)
+                        when {
+                            reminder != null -> onOpenReminder(reminder.id)
+                            slot.kind != null -> onAddReminderForKind(slot.kind)
+                            else -> onAddCustomReminder()
+                        }
                     },
                 )
             }
@@ -111,10 +129,12 @@ private fun MaintenanceRow(
     onClick: () -> Unit,
 ) {
     val reminder = slot.reminder
+    val tag = slot.kind?.let { MaintenanceListTags.row(it) }
+        ?: MaintenanceListTags.customRow(reminder?.id ?: 0L)
     GlassPanel(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag(MaintenanceListTags.row(slot.kind))
+            .testTag(tag)
             .clickable(onClick = onClick),
         shape = GlassShapeMedium,
         elevation = 6.dp,
@@ -127,7 +147,7 @@ private fun MaintenanceRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    slot.kind.title,
+                    slot.title,
                     style = MaterialTheme.typography.titleSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -154,14 +174,5 @@ private fun MaintenanceRow(
                 color = MaterialTheme.colorScheme.primary,
             )
         }
-    }
-}
-
-private fun allMaintenanceSlots(reminders: List<ReminderEntity>): List<MaintenanceSlot> {
-    return MaintenanceKind.entries.map { kind ->
-        val match = reminders
-            .filter { kind.matches(it.title) }
-            .minByOrNull { it.remainingKm ?: Int.MAX_VALUE }
-        MaintenanceSlot(kind, match)
     }
 }

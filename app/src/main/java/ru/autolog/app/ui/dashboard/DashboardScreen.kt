@@ -332,7 +332,7 @@ fun DashboardScreen(
                                     }
                                     StatCard(
                                         title = reminder?.title?.takeIf { it.isNotBlank() }
-                                            ?: slot.kind.title,
+                                            ?: slot.title,
                                         value = reminder?.remainingKm?.toString() ?: "нет данных",
                                         unit = when {
                                             reminder == null -> "не задано"
