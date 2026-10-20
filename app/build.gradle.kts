@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 35
 
-        val appVersionName = "0.8.2"
-        versionCode = 73
+        val appVersionName = "0.8.3"
+        versionCode = 74
         versionName = appVersionName
         resValue("string", "app_name", "Autolog $appVersionName")
         resValue("string", "app_version", appVersionName)
@@ -30,13 +30,6 @@ android {
         buildConfigField("String", "UPDATE_GITHUB_REPO", "\"autolog\"")
         // Overridden per buildType: Espresso pick on map for instrumented tests.
         buildConfigField("boolean", "SHOW_MAP_TEST_PICK", "false")
-
-        val localProps = Properties().apply {
-            val f = rootProject.file("local.properties")
-            if (f.exists()) f.inputStream().use { load(it) }
-        }
-        val googleWebClientId = localProps.getProperty("GOOGLE_WEB_CLIENT_ID", "")
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -170,14 +163,6 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:11.13.5")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
-
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
-    implementation("com.google.http-client:google-http-client-gson:1.45.0")
-    implementation("com.google.api-client:google-api-client-android:2.6.0") {
-        exclude(group = "org.apache.httpcomponents")
-    }
-    implementation("com.google.apis:google-api-services-drive:v3-rev20230822-2.0.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
     testImplementation("junit:junit:4.13.2")

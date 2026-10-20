@@ -5,10 +5,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
-/**
- * Product copy for cloud failures must stay Russian and specific.
- * FullFlow UI never hits real Drive — these cases are covered here + fake gateway UI tests.
- */
 @RunWith(Parameterized::class)
 class FormattersUserMessageTest(
     private val errorMessage: String?,
@@ -16,7 +12,7 @@ class FormattersUserMessageTest(
     private val expected: String,
 ) {
     @Test
-    fun mapsCloudFailuresToProductCopy() {
+    fun mapsFailuresToProductCopy() {
         val error = when {
             errorMessage == null -> null
             causeMessage != null -> Exception(errorMessage, Exception(causeMessage))
@@ -29,58 +25,33 @@ class FormattersUserMessageTest(
     }
 
     companion object {
-        private const val FALLBACK = "Не удалось сохранить в Google"
+        private const val FALLBACK = "Не удалось сохранить копию"
 
         @JvmStatic
         @Parameterized.Parameters(name = "{0}")
         fun cases(): Collection<Array<Any?>> = listOf(
             arrayOf(
-                "The user's Drive storage quota has been exceeded.",
+                "Unable to resolve host example.com",
                 null,
-                "На Google Диске закончилось место. Освободите место или войдите другим аккаунтом.",
-            ),
-            arrayOf(
-                "403 Forbidden",
-                "storageQuotaExceeded",
-                "На Google Диске закончилось место. Освободите место или войдите другим аккаунтом.",
-            ),
-            arrayOf(
-                "Access Not Configured. Drive API has not been used in project 123 before or it is disabled.",
-                null,
-                "Сохранение в Google пока недоступно. Попробуйте позже или напишите в поддержку.",
-            ),
-            arrayOf(
-                "Unable to resolve host www.googleapis.com",
-                null,
-                "Нет связи с Google. Проверьте интернет и попробуйте снова.",
+                "Нет связи. Проверьте интернет и попробуйте снова.",
             ),
             arrayOf(
                 "timeout",
                 null,
-                "Нет связи с Google. Проверьте интернет и попробуйте снова.",
+                "Нет связи. Проверьте интернет и попробуйте снова.",
             ),
             arrayOf(
-                "NeedRemoteConsent",
+                "ENOSPC: no space left on device",
                 null,
-                "Нужно снова разрешить доступ Google. Отвяжите аккаунт и привяжите заново.",
+                "Не хватает места на устройстве.",
             ),
             arrayOf(
-                "access_denied",
+                "Файл повреждён",
                 null,
-                "Google не дал доступ к сохранению. Отвяжите аккаунт и привяжите заново.",
+                "Файл повреждён",
             ),
             arrayOf(
-                "GoogleJsonResponseException: 403 Forbidden",
-                null,
-                "Google отклонил сохранение. Проверьте место на Диске или попробуйте другой аккаунт.",
-            ),
-            arrayOf(
-                "В Google пока нет резервной копии",
-                null,
-                "В Google пока нет резервной копии",
-            ),
-            arrayOf(
-                "Some English stack noise from Play Services",
+                "Some English stack noise",
                 null,
                 FALLBACK,
             ),

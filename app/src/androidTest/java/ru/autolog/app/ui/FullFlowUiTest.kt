@@ -422,18 +422,14 @@ class FullFlowUiTest {
         deleteVehicleViaSettings(vehicleId)
     }
 
-    /**
-     * Settings / Google copy must stay product-facing:
-     * no Cloud Console / sync jargon in visible UI.
-     */
+    /** Settings: file backup; no Google / OAuth copy. */
     @Test
-    fun settingsGoogleSection_showsProductCopy_withoutDevJargon() {
+    fun settingsBackupSection_showsFileCopyControls() {
         composeRule.waitUntil(15_000) {
             composeRule.onAllNodesWithTag(AddVehicleTags.SCREEN).fetchSemanticsNodes().isNotEmpty() ||
                 composeRule.onAllNodesWithTag(DashboardTags.ROOT).fetchSemanticsNodes().isNotEmpty()
         }
 
-        // Need a vehicle so dashboard settings gear is available
         if (composeRule.onAllNodesWithTag(AddVehicleTags.SCREEN).fetchSemanticsNodes().isNotEmpty()) {
             val suffix = System.currentTimeMillis().toString().takeLast(6)
             composeRule.onNodeWithTag(AddVehicleTags.NAME).performTextInput("UITest Settings $suffix")
@@ -449,45 +445,16 @@ class FullFlowUiTest {
 
         composeRule.onNodeWithTag(DashboardTags.OPEN_SETTINGS).performClick()
         waitTag(SettingsTags.ROOT)
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_SECTION).performScrollTo().assertIsDisplayed()
-
-        val linkVisible = composeRule.onAllNodesWithTag(SettingsTags.GOOGLE_LINK)
-            .fetchSemanticsNodes().isNotEmpty()
-        if (linkVisible) {
-            composeRule.onNodeWithTag(SettingsTags.GOOGLE_LINK).performScrollTo().assertIsDisplayed()
-            composeRule.onNodeWithText("Привязать Google", substring = false).assertIsDisplayed()
-            composeRule.onNodeWithText("Записи на телефоне не удаляются", substring = true)
-                .assertIsDisplayed()
-        } else {
-            // Already linked on this device — still check product copy around sync controls
-            composeRule.onNodeWithTag(SettingsTags.GOOGLE_SYNC_NOW).performScrollTo().assertIsDisplayed()
-            composeRule.onNodeWithText("Сохранить в Google сейчас", substring = true).assertIsDisplayed()
-        }
-        composeRule.onNodeWithTag(SettingsTags.GOOGLE_RESTORE).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("Восстановить из Google", substring = false).assertIsDisplayed()
-        composeRule.onNodeWithText("Заменит записи на телефоне", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTags.BACKUP_SECTION).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTags.BACKUP_EXPORT).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Сохранить в файл", substring = false).assertIsDisplayed()
+        composeRule.onNodeWithTag(SettingsTags.BACKUP_IMPORT).performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Восстановить из файла", substring = false).assertIsDisplayed()
 
         composeRule.onNodeWithTag(SettingsTags.VEHICLE_SECTION).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag(SettingsTags.DELETE_VEHICLE).assertIsDisplayed()
 
-        composeRule.onNodeWithText("Резервное копирование", substring = true)
-            .performScrollTo()
-            .assertIsDisplayed()
-
-        val forbidden = listOf(
-            "OAuth",
-            "Cloud Console",
-            "SHA-1",
-            "local.properties",
-            "BuildConfig",
-            "синк",
-            "снимок",
-            "чек-лист",
-            "Чек-лист",
-            "→ облако",
-            "телефон →",
-        )
-        forbidden.forEach { bad ->
+        listOf("Google", "OAuth", "Cloud Console", "Drive API", "SHA-1").forEach { bad ->
             assertTrue(
                 "UI must not show \"$bad\"",
                 composeRule.onAllNodesWithText(bad, substring = true)

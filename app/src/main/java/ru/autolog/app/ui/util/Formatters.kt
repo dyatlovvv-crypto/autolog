@@ -57,24 +57,10 @@ object Formatters {
         if (chain.isEmpty()) return fallback
         val lower = chain.lowercase()
         when {
-            "accessnotconfigured" in lower ||
-                "drive api has not been used" in lower ||
-                "drive api" in lower && "disabled" in lower ->
-                return "Сохранение в Google пока недоступно. Попробуйте позже или напишите в поддержку."
-            "storagequotaexceeded" in lower ||
-                "storage quota has been exceeded" in lower ||
-                "quota has been exceeded" in lower ->
-                return "На Google Диске закончилось место. Освободите место или войдите другим аккаунтом."
-            "userecoverableauthexception" in lower ||
-                "needremoteconsent" in lower ||
-                "authorization" in lower && "required" in lower ->
-                return "Нужно снова разрешить доступ Google. Отвяжите аккаунт и привяжите заново."
             "network" in lower || "unable to resolve" in lower || "timeout" in lower ->
-                return "Нет связи с Google. Проверьте интернет и попробуйте снова."
-            "insufficientpermissions" in lower || "access_denied" in lower ->
-                return "Google не дал доступ к сохранению. Отвяжите аккаунт и привяжите заново."
-            "403" in lower ->
-                return "Google отклонил сохранение. Проверьте место на Диске или попробуйте другой аккаунт."
+                return "Нет связи. Проверьте интернет и попробуйте снова."
+            "enospc" in lower || "no space" in lower ->
+                return "Не хватает места на устройстве."
         }
         val raw = error?.message?.trim().orEmpty()
         val looksRussian = raw.any { it in '\u0400'..'\u04FF' }
