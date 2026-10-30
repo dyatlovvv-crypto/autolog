@@ -71,6 +71,8 @@ import ru.autolog.app.domain.FuelType
 import ru.autolog.app.domain.MaintenanceCatalog
 import ru.autolog.app.domain.ServiceChecklistCodec
 import ru.autolog.app.domain.ServiceKind
+import ru.autolog.app.domain.ServicePhotosCodec
+import ru.autolog.app.domain.classifyAttachments
 import ru.autolog.app.ui.AutologViewModelFactory
 import ru.autolog.app.ui.components.AccentIcon
 import ru.autolog.app.ui.components.AccentIconButton
@@ -399,6 +401,16 @@ fun DashboardScreen(
                                 val roadKm = TimelineDistance.kmSincePreviousRefuel(timeline, index)
                                 val segmentLPer100 =
                                     TimelineDistance.consumptionLPer100SincePreviousFull(timeline, index)
+                                val attachFlags = remember(entry) {
+                                    val service = entry as? TimelineEntry.Service
+                                    if (service == null) {
+                                        null
+                                    } else {
+                                        classifyAttachments(
+                                            ServicePhotosCodec.decode(service.entity.photoPathsJson),
+                                        )
+                                    }
+                                }
                                 ExpandableTimelineItem(
                                     kind = presentation.kind,
                                     kindKey = presentation.kindKey,
@@ -427,6 +439,8 @@ fun DashboardScreen(
                                     showStationMap = entry is TimelineEntry.Refuel &&
                                         entry.entity.stationLat != null &&
                                         entry.entity.stationLon != null,
+                                    hasImageAttachment = attachFlags?.hasImage == true,
+                                    hasFileAttachment = attachFlags?.hasFile == true,
                                     onToggle = {
                                         expandedKey = if (expandedKey == key) null else key
                                     },

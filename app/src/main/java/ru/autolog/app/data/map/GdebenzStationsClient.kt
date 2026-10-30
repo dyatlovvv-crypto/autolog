@@ -17,7 +17,7 @@ object GdebenzStationsClient {
     private const val TAG = "AutologMap"
     private const val BASE = "https://gdebenz.ru"
     private const val HTTP_UA =
-        "Autolog/0.8.2 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
+        "Autolog/0.8.4 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
 
     private val rtToken = AtomicReference<String?>(null)
     private val rtExpiresAtMs = AtomicReference(0L)

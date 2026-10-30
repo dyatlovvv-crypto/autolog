@@ -17,8 +17,8 @@ android {
         minSdk = 26
         targetSdk = 35
 
-        val appVersionName = "0.8.3"
-        versionCode = 74
+        val appVersionName = "0.8.6"
+        versionCode = 77
         versionName = appVersionName
         resValue("string", "app_name", "Autolog $appVersionName")
         resValue("string", "app_version", appVersionName)

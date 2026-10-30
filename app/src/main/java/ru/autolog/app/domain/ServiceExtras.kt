@@ -66,3 +66,28 @@ object ServicePhotosCodec {
         }.getOrDefault(emptyList())
     }
 }
+
+data class AttachmentFlags(
+    val hasImage: Boolean,
+    val hasFile: Boolean,
+)
+
+private val IMAGE_EXTENSIONS = setOf(
+    "jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "bmp",
+)
+
+fun isImageAttachmentPath(path: String): Boolean {
+    val ext = path.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+    return ext in IMAGE_EXTENSIONS
+}
+
+fun classifyAttachments(paths: List<String>): AttachmentFlags {
+    var hasImage = false
+    var hasFile = false
+    for (path in paths) {
+        if (path.isBlank()) continue
+        if (isImageAttachmentPath(path)) hasImage = true else hasFile = true
+        if (hasImage && hasFile) break
+    }
+    return AttachmentFlags(hasImage = hasImage, hasFile = hasFile)
+}

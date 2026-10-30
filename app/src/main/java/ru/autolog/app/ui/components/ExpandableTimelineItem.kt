@@ -27,7 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,6 +46,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +62,8 @@ object TimelineTags {
     fun actionEdit(kind: String, id: Long) = "timeline_action_edit_${kind}_$id"
     fun actionView(kind: String, id: Long) = "timeline_action_view_${kind}_$id"
     fun roadKm(kind: String, id: Long) = "timeline_road_km_${kind}_$id"
+    fun attachImage(kind: String, id: Long) = "timeline_attach_image_${kind}_$id"
+    fun attachFile(kind: String, id: Long) = "timeline_attach_file_${kind}_$id"
 }
 
 private val RoadAsphalt = Color(0xFF4A525A)
@@ -167,6 +173,8 @@ fun ExpandableTimelineItem(
     stationLon: Double? = null,
     stationLabel: String? = null,
     showStationMap: Boolean = false,
+    hasImageAttachment: Boolean = false,
+    hasFileAttachment: Boolean = false,
 ) {
     val tint = kind.tint()
     val icon = kind.icon()
@@ -175,6 +183,10 @@ fun ExpandableTimelineItem(
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "roadAlpha",
     )
+    val hasMeta =
+        !dateText.isNullOrBlank() || !kmText.isNullOrBlank() || !moneyText.isNullOrBlank()
+    val hasAttach = hasImageAttachment || hasFileAttachment
+    val mutedIcon = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
 
     Box(
         modifier = modifier
@@ -201,7 +213,7 @@ fun ExpandableTimelineItem(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                if (!dateText.isNullOrBlank() || !kmText.isNullOrBlank() || !moneyText.isNullOrBlank()) {
+                if (hasMeta || hasAttach) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -229,6 +241,36 @@ fun ExpandableTimelineItem(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        if (hasAttach) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (hasImageAttachment) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Image,
+                                        contentDescription = "Есть фото",
+                                        tint = mutedIcon,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .testTag(TimelineTags.attachImage(kindKey, id))
+                                            .semantics { contentDescription = "Есть фото" },
+                                    )
+                                }
+                                if (hasFileAttachment) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
+                                        contentDescription = "Есть файл",
+                                        tint = mutedIcon,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .testTag(TimelineTags.attachFile(kindKey, id))
+                                            .semantics { contentDescription = "Есть файл" },
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {

@@ -52,7 +52,6 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
-import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
@@ -64,6 +63,7 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.Point
 import ru.autolog.app.AutologApp
 import ru.autolog.app.BuildConfig
+import ru.autolog.app.data.map.MapBasemapStyle
 import ru.autolog.app.data.map.NearbyFuelStationsStore
 import ru.autolog.app.ui.glass.GlassScaffold
 import ru.autolog.app.ui.glass.GlassTopAppBar
@@ -76,7 +76,6 @@ object GasMapTags {
 }
 
 private const val TAG = "AutologMap"
-private const val STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 private const val SOURCE_STATIONS = "autolog-fuel-stations"
 private const val LAYER_STATIONS = "autolog-fuel-stations-layer"
 private const val SOURCE_HERE = "autolog-here"
@@ -336,25 +335,29 @@ fun GasStationMapScreen(
                             mapRef = map
                             map.uiSettings.isAttributionEnabled = true
                             map.uiSettings.isLogoEnabled = false
-                            map.setStyle(Style.Builder().fromUri(STYLE_URL)) { _ ->
-                                styleReady = true
-                                map.addOnMapClickListener { latLng ->
-                                    val screen = map.projection.toScreenLocation(latLng)
-                                    val hits = map.queryRenderedFeatures(screen, LAYER_STATIONS)
-                                    val f = hits.firstOrNull() ?: return@addOnMapClickListener false
-                                    val geom = f.geometry() as? Point
-                                        ?: return@addOnMapClickListener false
-                                    val name = f.getStringProperty(PROP_NAME)?.trim()
-                                        ?.ifBlank { null } ?: "АЗС"
-                                    pick(name, geom.latitude(), geom.longitude())
-                                    true
+                            // Inline OFM TileJSON tiles (bare …/planet/{z}/{x}/{y} is empty).
+                            MapBasemapStyle.prepare { styleBuilder ->
+                                map.setStyle(styleBuilder) { _ ->
+                                    styleReady = true
+                                    map.addOnMapClickListener { latLng ->
+                                        val screen = map.projection.toScreenLocation(latLng)
+                                        val hits = map.queryRenderedFeatures(screen, LAYER_STATIONS)
+                                        val f = hits.firstOrNull()
+                                            ?: return@addOnMapClickListener false
+                                        val geom = f.geometry() as? Point
+                                            ?: return@addOnMapClickListener false
+                                        val name = f.getStringProperty(PROP_NAME)?.trim()
+                                            ?.ifBlank { null } ?: "АЗС"
+                                        pick(name, geom.latitude(), geom.longitude())
+                                        true
+                                    }
+                                    // Instant paint from prefetch cache before GPS settles.
+                                    fuelStore.cachedOrNull()?.let { c ->
+                                        showHere(map, c.lat, c.lon, moveCamera = false)
+                                        applyStationsJson(map, c.json, centerOnUser = true)
+                                    }
+                                    centerAndLoad(ctx, map, fuelStore, ::loadStations)
                                 }
-                                // Instant paint from prefetch cache before GPS settles.
-                                fuelStore.cachedOrNull()?.let { c ->
-                                    showHere(map, c.lat, c.lon, moveCamera = false)
-                                    applyStationsJson(map, c.json, centerOnUser = true)
-                                }
-                                centerAndLoad(ctx, map, fuelStore, ::loadStations)
                             }
                         }
                     }

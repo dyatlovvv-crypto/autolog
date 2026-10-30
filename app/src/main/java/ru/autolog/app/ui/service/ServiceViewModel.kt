@@ -2,6 +2,7 @@ package ru.autolog.app.ui.service
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -323,14 +324,24 @@ class ServiceViewModel(
     }
 
     fun addPhotoFromUri(uri: Uri) {
+        addPhotosFromUris(listOf(uri))
+    }
+
+    fun addPhotosFromUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            val path = withContext(Dispatchers.IO) { copyUriToServicePhotos(appContext, uri) }
-            if (path != null) {
-                val next = ServicePhotosCodec.decode(photosJsonFlow.value) + path
-                savedStateHandle[KEY_PHOTOS_JSON] = ServicePhotosCodec.encode(next)
-                persistDraft()
-            } else {
-                _meta.update { it.copy(error = "Не удалось добавить фото") }
+            val paths = withContext(Dispatchers.IO) {
+                uris.mapNotNull { copyUriToServicePhotos(appContext, it) }
+            }
+            if (paths.isEmpty()) {
+                _meta.update { it.copy(error = "Не удалось добавить вложение") }
+                return@launch
+            }
+            val next = ServicePhotosCodec.decode(photosJsonFlow.value) + paths
+            savedStateHandle[KEY_PHOTOS_JSON] = ServicePhotosCodec.encode(next)
+            persistDraft()
+            if (paths.size < uris.size) {
+                _meta.update { it.copy(error = "Добавлено ${paths.size} из ${uris.size}") }
             }
         }
     }
@@ -441,7 +452,8 @@ class ServiceViewModel(
 internal fun copyUriToServicePhotos(context: Context, uri: Uri): String? {
     return try {
         val dir = File(context.filesDir, "service_photos").also { it.mkdirs() }
-        val out = File(dir, "${UUID.randomUUID()}.jpg")
+        val ext = guessAttachmentExtension(context, uri)
+        val out = File(dir, "${UUID.randomUUID()}.$ext")
         context.contentResolver.openInputStream(uri)?.use { input ->
             out.outputStream().use { output -> input.copyTo(output) }
         } ?: return null
@@ -449,4 +461,34 @@ internal fun copyUriToServicePhotos(context: Context, uri: Uri): String? {
     } catch (_: Exception) {
         null
     }
+}
+
+internal fun guessAttachmentExtension(context: Context, uri: Uri): String {
+    val mime = context.contentResolver.getType(uri)?.lowercase().orEmpty()
+    when {
+        mime == "image/jpeg" || mime == "image/jpg" -> return "jpg"
+        mime == "image/png" -> return "png"
+        mime == "image/webp" -> return "webp"
+        mime == "image/gif" -> return "gif"
+        mime == "image/heic" || mime == "image/heif" -> return "heic"
+        mime.startsWith("image/") -> return "jpg"
+        mime == "application/pdf" -> return "pdf"
+        mime == "application/msword" -> return "doc"
+        mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ->
+            return "docx"
+        mime == "application/vnd.ms-excel" -> return "xls"
+        mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> return "xlsx"
+        mime == "text/plain" -> return "txt"
+    }
+    val displayName = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
+    val fromName = displayName
+        ?.substringAfterLast('.', missingDelimiterValue = "")
+        ?.lowercase()
+        ?.takeIf { it.length in 1..8 && it.all(Char::isLetterOrDigit) }
+    return fromName ?: "bin"
 }

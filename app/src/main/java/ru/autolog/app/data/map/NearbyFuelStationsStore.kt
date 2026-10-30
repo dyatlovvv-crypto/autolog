@@ -217,7 +217,7 @@ class NearbyFuelStationsStore(
         private const val QUERY_RADIUS_M = 45_000
         private const val QUERY_RADIUS_KM = 45
         private const val HTTP_UA =
-            "Autolog/0.8.2 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
+            "Autolog/0.8.4 (Android; fuel map; contact=github.com/dyatlovvv-crypto/autolog)"
 
         private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val out = FloatArray(1)

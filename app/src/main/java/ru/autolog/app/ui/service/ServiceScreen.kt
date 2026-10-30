@@ -9,8 +9,10 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
@@ -52,6 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -66,6 +71,7 @@ import java.util.Calendar
 import java.util.UUID
 import ru.autolog.app.AutologApp
 import ru.autolog.app.domain.ServiceKind
+import ru.autolog.app.domain.isImageAttachmentPath
 import ru.autolog.app.ui.fluid.FluidCheckboxRow
 import ru.autolog.app.ui.fluid.rubberBandOverscroll
 import ru.autolog.app.ui.glass.GlassPanel
@@ -127,9 +133,15 @@ fun ServiceScreen(
     val dateLabel = remember(state.dateEpochMs) { vm.dateLabel() }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent(),
-    ) { uri ->
-        if (uri != null) vm.addPhotoFromUri(uri)
+        ActivityResultContracts.GetMultipleContents(),
+    ) { uris ->
+        if (uris.isNotEmpty()) vm.addPhotosFromUris(uris)
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isNotEmpty()) vm.addPhotosFromUris(uris)
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -382,7 +394,7 @@ fun ServiceScreen(
                                         onClick = { attachDialog = true },
                                         modifier = Modifier.testTag(ServiceTags.ATTACH),
                                     ) {
-                                        Icon(Icons.Default.AttachFile, contentDescription = "Прикрепить фото")
+                                        Icon(Icons.Default.AttachFile, contentDescription = "Прикрепить")
                                     }
                                 }
                             },
@@ -396,8 +408,13 @@ fun ServiceScreen(
                             ) {
                                 state.photoPaths.forEach { path ->
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        val bitmap = remember(path) {
-                                            BitmapFactory.decodeFile(path)?.asImageBitmap()
+                                        val showAsImage = isImageAttachmentPath(path)
+                                        val bitmap = remember(path, showAsImage) {
+                                            if (showAsImage) {
+                                                BitmapFactory.decodeFile(path)?.asImageBitmap()
+                                            } else {
+                                                null
+                                            }
                                         }
                                         if (bitmap != null) {
                                             Image(
@@ -408,6 +425,44 @@ fun ServiceScreen(
                                                     .clip(GlassShapeSmall),
                                                 contentScale = ContentScale.Crop,
                                             )
+                                        } else {
+                                            val label = remember(path) {
+                                                val name = File(path).name
+                                                val ext = name.substringAfterLast('.', "")
+                                                if (ext.isNotEmpty()) ext.uppercase() else "FILE"
+                                            }
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(88.dp)
+                                                    .clip(GlassShapeSmall)
+                                                    .background(
+                                                        MaterialTheme.colorScheme.surfaceVariant.copy(
+                                                            alpha = 0.55f,
+                                                        ),
+                                                    ),
+                                                contentAlignment = Alignment.Center,
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                    modifier = Modifier.padding(6.dp),
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(28.dp),
+                                                    )
+                                                    Text(
+                                                        text = label,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = TextAlign.Center,
+                                                    )
+                                                }
+                                            }
                                         }
                                         if (!readOnly) {
                                             TextButton(onClick = { vm.removePhoto(path) }) {
@@ -444,33 +499,45 @@ fun ServiceScreen(
     if (attachDialog) {
         AlertDialog(
             onDismissRequest = { attachDialog = false },
-            title = { Text("Фото") },
-            text = { Text("Галерея или камера") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        attachDialog = false
-                        galleryLauncher.launch("image/*")
-                    },
-                ) { Text("Галерея") }
+            title = { Text("Вложение") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            attachDialog = false
+                            galleryLauncher.launch("image/*")
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Галерея") }
+                    TextButton(
+                        onClick = {
+                            attachDialog = false
+                            val granted = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.CAMERA,
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) {
+                                val (file, uri) = createCameraCaptureFile(context)
+                                pendingCameraFile = file
+                                cameraLauncher.launch(uri)
+                            } else {
+                                cameraPermission.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Камера") }
+                    TextButton(
+                        onClick = {
+                            attachDialog = false
+                            fileLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Файл") }
+                }
             },
+            confirmButton = {},
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        attachDialog = false
-                        val granted = ContextCompat.checkSelfPermission(
-                            context,
-                            Manifest.permission.CAMERA,
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (granted) {
-                            val (file, uri) = createCameraCaptureFile(context)
-                            pendingCameraFile = file
-                            cameraLauncher.launch(uri)
-                        } else {
-                            cameraPermission.launch(Manifest.permission.CAMERA)
-                        }
-                    },
-                ) { Text("Камера") }
+                TextButton(onClick = { attachDialog = false }) { Text("Отмена") }
             },
         )
     }
